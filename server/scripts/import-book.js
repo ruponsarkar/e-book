@@ -19,7 +19,9 @@ const { Book, Section } = require('../src/models/Book');
 function kindFor(fileName) {
   const n = fileName.toLowerCase();
   if (n.includes('front')) return 'front';
-  if (n.includes('test') || n.includes('mock')) return 'test';
+  // A chapter about a kind of test (e.g. "22-chapter-22-cloze-test.md") is still a chapter.
+  if (n.includes('chapter')) return 'chapter';
+  if (n.includes('test-paper') || n.includes('mock')) return 'test';
   return 'chapter';
 }
 

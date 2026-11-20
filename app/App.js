@@ -1,5 +1,5 @@
 import React from 'react';
-import { ActivityIndicator, View } from 'react-native';
+import { ActivityIndicator, LogBox, View } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { StatusBar } from 'expo-status-bar';
@@ -11,6 +11,11 @@ import LibraryScreen from './src/screens/LibraryScreen';
 import BookScreen from './src/screens/BookScreen';
 import ReaderScreen from './src/screens/ReaderScreen';
 import ProfileScreen from './src/screens/ProfileScreen';
+
+// Known, harmless dev-only warning: @react-navigation/elements 2.9 passes a ref to
+// react-native-safe-area-context 4.12's SafeAreaProvider (Expo SDK 52's version), which
+// can't take one. Goes away when safe-area-context is upgraded with the next Expo SDK.
+LogBox.ignoreLogs([/Function components cannot be given refs[\s\S]*FrameSizeProvider/]);
 
 const Stack = createNativeStackNavigator();
 
