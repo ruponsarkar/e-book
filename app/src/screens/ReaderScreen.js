@@ -2,6 +2,7 @@ import React, { memo, useCallback, useLayoutEffect, useEffect, useMemo, useRef, 
 import { ActivityIndicator, Alert, Animated, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import Markdown from 'react-native-markdown-display';
 import { StatusBar } from 'expo-status-bar';
+import * as SecureStore from 'expo-secure-store';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { api } from '../api';
 import { useAuth } from '../auth/AuthContext';
@@ -31,6 +32,11 @@ export default function ReaderScreen({ route, navigation }) {
   const size = prefs.size;
 
   useScreenshotReporter(slug, key);
+
+  // Remembers which section was open (just its key, never its text) for "Continue reading".
+  useEffect(() => {
+    SecureStore.setItemAsync(`lastRead.${slug}`, key).catch(() => {});
+  }, [slug, key]);
 
   useEffect(() => {
     setSection(null);

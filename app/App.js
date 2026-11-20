@@ -32,7 +32,11 @@ function Root() {
       {user ? (
         <>
           <Stack.Screen name="Library" component={LibraryScreen} options={{ title: 'My Books' }} />
-          <Stack.Screen name="Book" component={BookScreen} options={({ route }) => ({ title: route.params.title })} />
+          <Stack.Screen
+            name="Book"
+            component={BookScreen}
+            options={{ title: '', headerStyle: { backgroundColor: '#f6f1e7' }, headerShadowVisible: false }}
+          />
           <Stack.Screen name="Reader" component={ReaderScreen} options={({ route }) => ({ title: route.params.title })} />
           <Stack.Screen
             name="Profile"
