@@ -25,6 +25,8 @@ export default function BookScreen({ route, navigation }) {
   const groups = GROUPS.map((g) => ({ title: g.label, data: data.sections.filter((s) => s.kind === g.kind) })).filter(
     (g) => g.data.length
   );
+  // Same order as the contents list, for the reader's Previous / Next links.
+  const readingOrder = groups.flatMap((g) => g.data.map(({ key, title }) => ({ key, title })));
 
   return (
     <SectionList
@@ -50,7 +52,7 @@ export default function BookScreen({ route, navigation }) {
             index === section.data.length - 1 && styles.rowLast,
             pressed && styles.rowPressed,
           ]}
-          onPress={() => navigation.navigate('Reader', { slug, key: item.key, title: item.title })}
+          onPress={() => navigation.navigate('Reader', { slug, key: item.key, title: item.title, sections: readingOrder })}
         >
           <Text style={styles.rowText}>{item.title}</Text>
           <Text style={styles.chev}>›</Text>
