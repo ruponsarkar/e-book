@@ -7,8 +7,14 @@ import BookCover, { PAPER, SERIF } from '../components/BookCover';
 const PADDING = 16;
 const GAP = 20;
 
+function initials(user) {
+  const src = (user.name || user.email.split('@')[0]).trim();
+  const parts = src.split(/[\s._-]+/).filter(Boolean);
+  return ((parts[0]?.[0] || '') + (parts[1]?.[0] || '')).toUpperCase() || '?';
+}
+
 export default function LibraryScreen({ navigation }) {
-  const { user, logout } = useAuth();
+  const { user } = useAuth();
   const { width } = useWindowDimensions();
   const [books, setBooks] = useState([]);
   const [error, setError] = useState('');
@@ -20,12 +26,12 @@ export default function LibraryScreen({ navigation }) {
   useLayoutEffect(() => {
     navigation.setOptions({
       headerRight: () => (
-        <Pressable onPress={logout} hitSlop={10}>
-          <Text style={{ color: '#1f3a5f', fontWeight: '600' }}>Log out</Text>
+        <Pressable onPress={() => navigation.navigate('Profile')} hitSlop={10} style={styles.avatar}>
+          <Text style={styles.avatarText}>{initials(user)}</Text>
         </Pressable>
       ),
     });
-  }, [navigation, logout]);
+  }, [navigation, user]);
 
   const load = useCallback(async () => {
     setRefreshing(true);
@@ -77,6 +83,17 @@ export default function LibraryScreen({ navigation }) {
 }
 
 const styles = StyleSheet.create({
+  avatar: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: '#1f3a5f',
+    borderWidth: 1.5,
+    borderColor: '#d4b36a',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  avatarText: { color: '#d4b36a', fontWeight: '800', fontSize: 13, fontFamily: SERIF },
   hello: { color: '#8a7a5c', marginBottom: 16 },
   empty: { color: '#667', textAlign: 'center', marginTop: 40 },
   item: { marginBottom: 24 },

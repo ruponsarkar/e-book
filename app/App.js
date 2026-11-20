@@ -10,6 +10,7 @@ import LoginScreen from './src/screens/LoginScreen';
 import LibraryScreen from './src/screens/LibraryScreen';
 import BookScreen from './src/screens/BookScreen';
 import ReaderScreen from './src/screens/ReaderScreen';
+import ProfileScreen from './src/screens/ProfileScreen';
 
 const Stack = createNativeStackNavigator();
 
@@ -33,6 +34,11 @@ function Root() {
           <Stack.Screen name="Library" component={LibraryScreen} options={{ title: 'My Books' }} />
           <Stack.Screen name="Book" component={BookScreen} options={({ route }) => ({ title: route.params.title })} />
           <Stack.Screen name="Reader" component={ReaderScreen} options={({ route }) => ({ title: route.params.title })} />
+          <Stack.Screen
+            name="Profile"
+            component={ProfileScreen}
+            options={{ title: 'Profile', headerStyle: { backgroundColor: '#f6f1e7' }, headerShadowVisible: false }}
+          />
         </>
       ) : (
         <Stack.Screen name="Login" component={LoginScreen} options={{ headerShown: false }} />

@@ -142,6 +142,9 @@ server/
   src/routes/auth.js        login, me, logout (+ optional signup)
   src/routes/books.js       library, contents, section, screenshot report
   src/routes/admin.js       users, access, sessions, screenshot log
+  src/routes/progress.js    test-paper answers & scores, profile
+  src/lib/testKey.js        grades test papers from their own answer key
+  src/models/TestAttempt.js saved answers (in progress) and submitted results
   scripts/create-admin.js
   scripts/import-book.js
   scripts/grant-books.js    give a student access to books

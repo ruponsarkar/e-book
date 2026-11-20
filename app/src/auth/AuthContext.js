@@ -89,7 +89,10 @@ export function AuthProvider({ children }) {
     await clearLocal();
   }, [clearLocal]);
 
-  return <AuthContext.Provider value={{ user, loading, login, logout }}>{children}</AuthContext.Provider>;
+  // Local update after the profile is edited (e.g. a new name).
+  const updateUser = useCallback((patch) => setUser((u) => (u ? { ...u, ...patch } : u)), []);
+
+  return <AuthContext.Provider value={{ user, loading, login, logout, updateUser }}>{children}</AuthContext.Provider>;
 }
 
 export function useAuth() {

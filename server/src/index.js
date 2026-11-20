@@ -14,6 +14,7 @@ app.get('/health', (req, res) => res.json({ ok: true }));
 app.use('/auth', require('./routes/auth'));
 app.use('/books', require('./routes/books'));
 app.use('/admin', require('./routes/admin'));
+app.use('/progress', require('./routes/progress'));
 
 app.use((err, req, res, next) => {
   console.error(err);

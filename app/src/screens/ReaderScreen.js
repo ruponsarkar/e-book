@@ -74,9 +74,68 @@ export default function ReaderScreen({ route, navigation }) {
   const contentH = useRef(0);
   const updateMax = () => maxScroll.setValue(Math.max(1, contentH.current - layoutH.current));
 
-  const onPick = useCallback(
-    (num, letter) => setPicks((p) => ({ ...p, [num]: letter })),
-    []
+  const dirty = useRef(false);
+  const onPick = useCallback((num, letter) => {
+    dirty.current = true;
+    setPicks((p) => ({ ...p, [num]: letter }));
+  }, []);
+
+  // ---- Test papers: answers and results live on the server ----
+  const [history, setHistory] = useState(null); // { best, attempts: [...] }
+  const [result, setResult] = useState(null); // server-graded attempt just submitted
+  const [saveState, setSaveState] = useState('idle'); // idle | saving | saved | failed
+  const [busy, setBusy] = useState(false);
+  const testPath = `/progress/tests/${slug}/${key}`;
+
+  // Restore a sitting in progress and load past scores.
+  useEffect(() => {
+    if (mode !== 'test') return;
+    let live = true;
+    api(testPath)
+      .then((d) => {
+        if (!live) return;
+        setHistory({ best: d.best, attempts: d.attempts });
+        if (d.draft) {
+          const saved = Object.fromEntries(Object.entries(d.draft.answers).map(([k, v]) => [Number(k), v]));
+          setPicks((p) => ({ ...saved, ...p }));
+          setSaveState('saved');
+        }
+      })
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, [mode, testPath]);
+
+  // Save answers shortly after each change, and right away when leaving the screen.
+  const latest = useRef(picks);
+  latest.current = picks;
+  const saveTimer = useRef(null);
+  const saveDraft = useCallback(() => {
+    clearTimeout(saveTimer.current);
+    saveTimer.current = null;
+    dirty.current = false;
+    setSaveState('saving');
+    const answers = Object.fromEntries(Object.entries(latest.current).filter(([, v]) => v && v !== '?'));
+    return api(`${testPath}/draft`, { method: 'PUT', body: { answers } })
+      .then(() => setSaveState('saved'))
+      .catch(() => {
+        dirty.current = true;
+        setSaveState('failed');
+      });
+  }, [testPath]);
+
+  useEffect(() => {
+    if (mode !== 'test' || submitted || !dirty.current) return;
+    clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(saveDraft, 800);
+  }, [picks, mode, submitted, saveDraft]);
+
+  useEffect(
+    () => () => {
+      if (saveTimer.current || dirty.current) saveDraft();
+    },
+    [saveDraft]
   );
 
   const md = useMemo(() => markdownStyles(t, size, font), [t, size, font]);
@@ -98,9 +157,26 @@ export default function ReaderScreen({ route, navigation }) {
 
   const submit = () => {
     const left = questions.length - answered.length;
-    const doIt = () => {
-      setSubmitted(true);
-      scrollRef.current?.scrollTo({ y: 0, animated: true });
+    const doIt = async () => {
+      clearTimeout(saveTimer.current);
+      saveTimer.current = null;
+      dirty.current = false;
+      setBusy(true);
+      try {
+        const answers = Object.fromEntries(answered.map((q) => [q.num, picks[q.num]]));
+        const { attempt } = await api(`${testPath}/submit`, { method: 'POST', body: { answers } });
+        setResult(attempt);
+        setHistory((h) => ({
+          best: Math.max(h?.best ?? 0, attempt.percent),
+          attempts: [attempt, ...(h?.attempts || [])],
+        }));
+        setSubmitted(true);
+        scrollRef.current?.scrollTo({ y: 0, animated: true });
+      } catch (e) {
+        Alert.alert('Could not submit', `${e.message}\n\nYour answers are kept; try again.`);
+      } finally {
+        setBusy(false);
+      }
     };
     if (left > 0) {
       Alert.alert('Submit test?', `${left} question${left > 1 ? 's are' : ' is'} unanswered.`, [
@@ -110,8 +186,14 @@ export default function ReaderScreen({ route, navigation }) {
     } else doIt();
   };
   const reset = () => {
+    if (mode === 'test') api(`${testPath}/draft`, { method: 'DELETE' }).catch(() => {});
+    clearTimeout(saveTimer.current);
+    saveTimer.current = null;
+    dirty.current = false;
     setPicks({});
     setSubmitted(false);
+    setResult(null);
+    setSaveState('idle');
     scrollRef.current?.scrollTo({ y: 0, animated: true });
   };
 
@@ -156,13 +238,22 @@ export default function ReaderScreen({ route, navigation }) {
         }}
       >
         {mode === 'test' && submitted ? (
-          <ScoreCard t={t} font={font} correct={correct} total={questions.length} answered={answered.length} onReset={reset} />
+          <ScoreCard
+            t={t}
+            font={font}
+            correct={result?.correct ?? correct}
+            wrong={result?.wrong ?? answered.length - correct}
+            total={result?.total ?? questions.length}
+            best={history?.best}
+            tries={history?.attempts.length}
+            onReset={reset}
+          />
         ) : null}
 
         {parsed.blocks.map((b, i) => {
           switch (b.type) {
             case 'opener':
-              return <Opener key={i} b={b} t={t} isTest={mode === 'test'} count={questions.length} />;
+              return <Opener key={i} b={b} t={t} isTest={mode === 'test'} count={questions.length} history={history} />;
             case 'h2':
               return <SectionHeading key={i} b={b} t={t} size={size} />;
             case 'h3':
@@ -246,7 +337,7 @@ export default function ReaderScreen({ route, navigation }) {
           {submitted ? (
             <>
               <Text style={{ flex: 1, color: t.text, fontFamily: FAMILIES.serif, fontSize: 17 }}>
-                Score {correct}/{questions.length}
+                Score {result?.correct ?? correct}/{result?.total ?? questions.length}
               </Text>
               <Pressable onPress={reset} style={[styles.primaryBtn, { backgroundColor: t.text }]}>
                 <Text style={[styles.primaryText, { color: t.bg }]}>Retake</Text>
@@ -257,6 +348,9 @@ export default function ReaderScreen({ route, navigation }) {
               <View style={{ flex: 1 }}>
                 <Text style={{ color: t.text, fontWeight: '700' }}>
                   {answered.length} / {questions.length} answered
+                  <Text style={{ color: saveState === 'failed' ? t.wrong : t.muted, fontWeight: '400', fontSize: 12 }}>
+                    {saveState === 'saving' ? '  · saving…' : saveState === 'saved' ? '  · saved' : saveState === 'failed' ? '  · not saved' : ''}
+                  </Text>
                 </Text>
                 <View style={[styles.miniTrack, { backgroundColor: t.border }]}>
                   <View
@@ -269,10 +363,10 @@ export default function ReaderScreen({ route, navigation }) {
               </View>
               <Pressable
                 onPress={submit}
-                disabled={answered.length === 0}
-                style={[styles.primaryBtn, { backgroundColor: t.accent, opacity: answered.length ? 1 : 0.4 }]}
+                disabled={answered.length === 0 || busy}
+                style={[styles.primaryBtn, { backgroundColor: t.accent, opacity: answered.length && !busy ? 1 : 0.4 }]}
               >
-                <Text style={[styles.primaryText, { color: '#fff' }]}>Submit</Text>
+                {busy ? <ActivityIndicator color="#fff" /> : <Text style={[styles.primaryText, { color: '#fff' }]}>Submit</Text>}
               </Pressable>
             </>
           )}
@@ -294,7 +388,7 @@ const MdBlock = memo(function MdBlock({ text, md, rules }) {
   );
 });
 
-function Opener({ b, t, isTest, count }) {
+function Opener({ b, t, isTest, count, history }) {
   return (
     <View style={styles.opener}>
       {b.en.label ? <Text style={[styles.openerLabel, { color: t.accent }]}>{b.en.label.toUpperCase()}</Text> : null}
@@ -318,6 +412,12 @@ function Opener({ b, t, isTest, count }) {
           </Text>
         </View>
       ) : null}
+      {isTest && history?.attempts.length ? (
+        <Text style={{ color: t.muted, marginTop: 10, fontSize: 13 }}>
+          Last {history.attempts[0].percent}% · Best {history.best}% · {history.attempts.length} attempt
+          {history.attempts.length === 1 ? '' : 's'}
+        </Text>
+      ) : null}
     </View>
   );
 }
@@ -336,15 +436,20 @@ function SectionHeading({ b, t, size }) {
   );
 }
 
-function ScoreCard({ t, font, correct, total, answered, onReset }) {
+function ScoreCard({ t, font, correct, wrong, total, best, tries, onReset }) {
   const pct = total ? Math.round((correct / total) * 100) : 0;
   return (
     <View style={[styles.score, { backgroundColor: t.surface, borderColor: t.accent }]}>
       <Text style={[styles.practiceLabel, { color: t.accent }]}>YOUR RESULT</Text>
       <Text style={{ fontFamily: FAMILIES.serif, fontSize: 44, color: t.text, marginTop: 4 }}>{pct}%</Text>
       <Text style={{ color: t.text, fontFamily: font, fontSize: 16 }}>
-        {correct} correct · {answered - correct} wrong · {total - answered} skipped
+        {correct} correct · {wrong} wrong · {total - correct - wrong} skipped
       </Text>
+      {best != null ? (
+        <Text style={{ color: t.muted, marginTop: 6, fontSize: 13 }}>
+          Best {best}% · {tries} attempt{tries === 1 ? '' : 's'} · saved to your profile
+        </Text>
+      ) : null}
       <Text style={{ color: t.muted, marginTop: 6, fontSize: 13 }}>Scroll down to review each answer.</Text>
       <Pressable onPress={onReset} style={[styles.ghostBtn, { borderColor: t.border }]}>
         <Text style={{ color: t.text, fontWeight: '600' }}>Retake test</Text>
