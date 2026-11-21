@@ -20,6 +20,8 @@ const sectionSchema = new mongoose.Schema(
     title: { type: String, required: true },
     kind: { type: String, enum: ['front', 'chapter', 'test'], default: 'chapter' },
     markdown: { type: String, required: true },
+    // Content fingerprint; the app re-downloads a section only when this changes.
+    hash: { type: String, default: '' },
   },
   { timestamps: true }
 );

@@ -1,10 +1,16 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import * as SecureStore from 'expo-secure-store';
 import { api } from '../api';
 import BookCover, { GOLD, PAPER, SERIF } from '../components/BookCover';
 import { splitBilingual } from '../reader/parse';
+import { prefetch, useCached } from '../cache/useCached';
+import { vault } from '../cache/vault';
+import { lease } from '../cache/lease';
+import OfflineBanner from '../components/OfflineBanner';
+
+const sectionPath = (slug, key) => `/books/${slug}/sections/${key}`;
 
 const INK = '#2a2418';
 const MUTED = '#8a7a5c';
@@ -37,21 +43,22 @@ const pad = (n) => String(n).padStart(2, '0');
 export default function BookScreen({ route, navigation }) {
   const { slug } = route.params;
   const { width } = useWindowDimensions();
-  const [data, setData] = useState(null);
-  const [error, setError] = useState('');
+  const { data, error: loadError, offline } = useCached(`/books/${slug}`, { book: slug });
+  const error = loadError?.message || '';
   const [tests, setTests] = useState({});
   const [lastKey, setLastKey] = useState(null);
   const [tab, setTab] = useState('chapters');
 
-  useEffect(() => {
-    api(`/books/${slug}`).then(setData).catch((e) => setError(e.message));
-  }, [slug]);
-
   // Scores and last-read position change while the student is in the reader; refresh on return.
   useFocusEffect(
     useCallback(() => {
-      api(`/progress/books/${slug}`)
-        .then((d) => setTests(d.tests || {}))
+      const path = `/progress/books/${slug}`;
+      vault.get(path).then((saved) => saved && setTests(saved.value.tests || {}));
+      api(path)
+        .then((d) => {
+          setTests(d.tests || {});
+          vault.set(path, d, { book: slug }).catch(() => {});
+        })
         .catch(() => {});
       SecureStore.getItemAsync(`lastRead.${slug}`)
         .then(setLastKey)
@@ -66,7 +73,7 @@ export default function BookScreen({ route, navigation }) {
     const chapters = pick('chapter');
     const papers = pick('test');
     // Same order as shown, for the reader's Previous / Next links.
-    const order = [...front, ...chapters, ...papers].map(({ key, title }) => ({ key, title }));
+    const order = [...front, ...chapters, ...papers].map(({ key, title, v }) => ({ key, title, v }));
     return { front, chapters, papers, order };
   }, [data]);
 
@@ -86,7 +93,7 @@ export default function BookScreen({ route, navigation }) {
   }
 
   const { front, chapters, papers, order } = parts;
-  const open = (s) => navigation.navigate('Reader', { slug, key: s.key, title: s.title, sections: order });
+  const open = (s) => navigation.navigate('Reader', { slug, key: s.key, title: s.title, v: s.v, sections: order });
   const all = [...front, ...chapters, ...papers];
   const last = all.find((s) => s.key === lastKey);
   const startAt = last || chapters[0] || all[0];
@@ -97,6 +104,7 @@ export default function BookScreen({ route, navigation }) {
 
   return (
     <ScrollView style={{ backgroundColor: PAPER }} contentContainerStyle={styles.content}>
+      {offline ? <OfflineBanner /> : null}
       {/* ---- Hero ---- */}
       <View style={styles.hero}>
         <BookCover book={book} width={coverW} />
@@ -111,6 +119,8 @@ export default function BookScreen({ route, navigation }) {
         </View>
       </View>
       {book.subtitle ? <Text style={styles.subtitle}>{book.subtitle}</Text> : null}
+
+      <DownloadBar slug={slug} sections={all} />
 
       {/* ---- Continue ---- */}
       {startAt ? (
@@ -190,6 +200,80 @@ export default function BookScreen({ route, navigation }) {
         </>
       )}
     </ScrollView>
+  );
+}
+
+// "Download for offline": saves every section of the book, encrypted, skipping ones already current.
+function DownloadBar({ slug, sections }) {
+  const count = () => sections.filter((s) => vault.has(sectionPath(slug, s.key), s.v)).length;
+  const [saved, setSaved] = useState(count);
+  const [running, setRunning] = useState(false);
+  const cancelled = useRef(false);
+  const total = sections.length;
+
+  useEffect(() => {
+    setSaved(count());
+    return () => {
+      cancelled.current = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [slug, total]);
+
+  const download = async () => {
+    setRunning(true);
+    cancelled.current = false;
+    try {
+      for (const s of sections) {
+        if (cancelled.current) break;
+        await prefetch(sectionPath(slug, s.key), { book: slug, v: s.v });
+        setSaved(count());
+      }
+    } catch (e) {
+      Alert.alert('Download stopped', `${e.message}\n\nWhat was saved so far stays on the phone.`);
+    } finally {
+      setRunning(false);
+      setSaved(count());
+    }
+  };
+
+  const remove = () =>
+    Alert.alert('Remove download?', 'Chapters will load from the internet again.', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Remove',
+        style: 'destructive',
+        onPress: async () => {
+          for (const s of sections) await vault.remove(sectionPath(slug, s.key));
+          setSaved(count());
+        },
+      },
+    ]);
+
+  const done = total > 0 && saved === total;
+  if (lease.days() === 0) return null; // the publisher has turned offline reading off
+  return (
+    <View style={styles.dl}>
+      <View style={{ flex: 1 }}>
+        <Text style={styles.dlTitle}>{done ? '✓ Available offline' : running ? 'Downloading…' : 'Read without internet'}</Text>
+        <Text style={styles.dlSub}>
+          {done ? 'Saved on this phone, encrypted' : `${saved} of ${total} sections saved`}
+        </Text>
+        {!done ? (
+          <View style={styles.dlTrack}>
+            <View style={[styles.dlFill, { width: `${total ? (saved / total) * 100 : 0}%` }]} />
+          </View>
+        ) : null}
+      </View>
+      {done ? (
+        <Pressable onPress={remove} hitSlop={8} style={styles.dlGhost}>
+          <Text style={styles.dlGhostText}>Remove</Text>
+        </Pressable>
+      ) : (
+        <Pressable onPress={download} disabled={running} style={[styles.dlBtn, running && { opacity: 0.6 }]}>
+          {running ? <ActivityIndicator color="#fff" size="small" /> : <Text style={styles.dlBtnText}>Download</Text>}
+        </Pressable>
+      )}
+    </View>
   );
 }
 
@@ -301,6 +385,24 @@ const styles = StyleSheet.create({
   lastDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: GOLD, marginRight: 5 },
   lastText: { fontSize: 9, fontWeight: '800', letterSpacing: 1, color: DEEP_GOLD },
 
+  dl: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: CARD,
+    borderRadius: 16,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: LINE,
+    padding: 14,
+    marginTop: 18,
+  },
+  dlTitle: { fontWeight: '800', color: INK, fontSize: 14 },
+  dlSub: { color: MUTED, fontSize: 12, marginTop: 2 },
+  dlTrack: { height: 4, borderRadius: 2, backgroundColor: LINE, marginTop: 8, marginRight: 12, overflow: 'hidden' },
+  dlFill: { height: 4, borderRadius: 2, backgroundColor: GOLD },
+  dlBtn: { backgroundColor: '#1f3a5f', borderRadius: 999, paddingHorizontal: 16, height: 36, justifyContent: 'center', minWidth: 96, alignItems: 'center' },
+  dlBtnText: { color: '#fff', fontWeight: '800' },
+  dlGhost: { borderWidth: 1, borderColor: LINE, borderRadius: 999, paddingHorizontal: 14, height: 34, justifyContent: 'center' },
+  dlGhostText: { color: MUTED, fontWeight: '700' },
   testsIntro: { color: MUTED, fontSize: 13, lineHeight: 19, marginBottom: 12, marginHorizontal: 2 },
   grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 12 },
   tile: { backgroundColor: CARD, borderRadius: 18, borderWidth: StyleSheet.hairlineWidth, borderColor: LINE, padding: 14 },

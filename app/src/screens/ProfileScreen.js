@@ -12,6 +12,9 @@ import {
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { api } from '../api';
+import { syncAll } from '../cache/sync';
+import { vault } from '../cache/vault';
+import OfflineBanner from '../components/OfflineBanner';
 import { useAuth } from '../auth/AuthContext';
 import { GOLD, PAPER, SERIF } from '../components/BookCover';
 
@@ -45,13 +48,21 @@ export default function ProfileScreen({ navigation }) {
   const [data, setData] = useState(null);
   const [error, setError] = useState('');
   const [refreshing, setRefreshing] = useState(false);
+  const [offline, setOffline] = useState(false);
 
+  // Saved copy first, then the server's.
   const load = useCallback(async () => {
+    const saved = await vault.get('/progress/profile');
+    if (saved) setData((d) => d || saved.value);
     try {
-      setData(await api('/progress/profile'));
+      const fresh = await api('/progress/profile');
+      setData(fresh);
       setError('');
+      setOffline(false);
+      vault.set('/progress/profile', fresh).catch(() => {});
     } catch (e) {
-      setError(e.message);
+      if (saved) setOffline(true);
+      else setError(e.message);
     }
   }, []);
 
@@ -83,6 +94,7 @@ export default function ProfileScreen({ navigation }) {
       contentContainerStyle={styles.content}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} />}
     >
+      {offline ? <OfflineBanner /> : null}
       <Header
         user={user}
         onRenamed={(name) => {
@@ -178,6 +190,8 @@ export default function ProfileScreen({ navigation }) {
       </View>
       <Text style={styles.note}>Your account can be used on one phone at a time.</Text>
 
+      <SyncCard onProfile={setData} onOnline={() => setOffline(false)} />
+
       <Pressable
         onPress={() =>
           Alert.alert('Log out?', 'Your test results stay saved to your account.', [
@@ -190,6 +204,79 @@ export default function ProfileScreen({ navigation }) {
         <Text style={styles.logoutText}>Log out</Text>
       </Pressable>
     </ScrollView>
+  );
+}
+
+function timeAgo(t) {
+  if (!t) return 'Never synced';
+  const m = Math.round((Date.now() - t) / 60000);
+  if (m < 1) return 'Synced just now';
+  if (m < 60) return `Synced ${m} min ago`;
+  const h = Math.round(m / 60);
+  if (h < 24) return `Synced ${h} hour${h === 1 ? '' : 's'} ago`;
+  return `Synced on ${fmtDate(t)}`;
+}
+
+function summary(r) {
+  const parts = [];
+  if (r.newBooks) parts.push(`${r.newBooks} new book${r.newBooks === 1 ? '' : 's'}`);
+  if (r.updated) parts.push(`${r.updated} chapter${r.updated === 1 ? '' : 's'} updated`);
+  if (r.removed) parts.push(`${r.removed} removed`);
+  return parts.length ? parts.join(' · ') : 'Everything is up to date';
+}
+
+// "Sync latest": fetches every change from the server and refreshes saved chapters.
+function SyncCard({ onProfile, onOnline }) {
+  const { refreshAccount } = useAuth();
+  const [last, setLast] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [step, setStep] = useState('');
+  const [result, setResult] = useState('');
+  const [failed, setFailed] = useState('');
+
+  useFocusEffect(
+    useCallback(() => {
+      vault.get('sync.last').then((e) => setLast(e?.value || null));
+    }, [])
+  );
+
+  const run = async () => {
+    setBusy(true);
+    setFailed('');
+    setResult('');
+    try {
+      const r = await syncAll({
+        refreshAccount,
+        onProgress: ({ done, total }) => setStep(total ? `Checking book ${Math.min(done + 1, total)} of ${total}…` : ''),
+      });
+      if (r.profile) onProfile(r.profile);
+      onOnline();
+      setLast(Date.now());
+      setResult(summary(r) + (r.failed ? ` · ${r.failed} book${r.failed === 1 ? '' : 's'} could not be checked` : ''));
+    } catch (e) {
+      setFailed(e.message || 'Sync failed. Try again.');
+    } finally {
+      setBusy(false);
+      setStep('');
+    }
+  };
+
+  return (
+    <View style={[styles.card, styles.syncCard]}>
+      <View style={{ flex: 1 }}>
+        <Text style={styles.syncTitle}>Latest content</Text>
+        <Text style={[styles.small, failed && { color: '#b3402f' }]} numberOfLines={2}>
+          {busy ? step || 'Connecting…' : failed || result || timeAgo(last)}
+        </Text>
+      </View>
+      <Pressable
+        onPress={run}
+        disabled={busy}
+        style={({ pressed }) => [styles.syncBtn, (pressed || busy) && { opacity: 0.75 }]}
+      >
+        {busy ? <ActivityIndicator color="#fff" size="small" /> : <Text style={styles.syncBtnText}>↻  Sync</Text>}
+      </Pressable>
+    </View>
   );
 }
 
@@ -366,6 +453,20 @@ const styles = StyleSheet.create({
   statValue: { fontFamily: SERIF, fontSize: 26, color: INK, fontWeight: '700' },
   statLabel: { fontSize: 10, fontWeight: '800', letterSpacing: 1.2, color: MUTED, marginTop: 4 },
   statSub: { fontSize: 11, color: MUTED, marginTop: 2 },
+
+  syncCard: { flexDirection: 'row', alignItems: 'center', marginTop: 26, paddingVertical: 14 },
+  syncTitle: { fontFamily: SERIF, fontSize: 16, color: INK },
+  syncBtn: {
+    backgroundColor: NAVY,
+    borderRadius: 999,
+    paddingHorizontal: 18,
+    height: 40,
+    minWidth: 92,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: 12,
+  },
+  syncBtnText: { color: '#fff', fontWeight: '800', fontSize: 14 },
 
   sectionTitle: { fontSize: 11, fontWeight: '800', letterSpacing: 1.5, color: MUTED, marginTop: 26, marginBottom: 8, marginLeft: 4 },
   card: { backgroundColor: CARD, borderRadius: 16, borderWidth: StyleSheet.hairlineWidth, borderColor: LINE, paddingHorizontal: 14 },

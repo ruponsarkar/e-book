@@ -1,4 +1,5 @@
 import Constants from 'expo-constants';
+import { lease } from './cache/lease';
 
 export const API_URL = Constants.expoConfig?.extra?.apiUrl ?? 'http://localhost:4000';
 
@@ -24,8 +25,12 @@ export class ApiError extends Error {
 
 export async function api(path, { method = 'GET', body } = {}) {
   let res;
+  // Give up after 15 s so a weak connection falls back to the saved copy instead of hanging.
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 15000);
   try {
     res = await fetch(`${API_URL}${path}`, {
+      signal: controller.signal,
       method,
       headers: {
         'Content-Type': 'application/json',
@@ -34,7 +39,9 @@ export async function api(path, { method = 'GET', body } = {}) {
       body: body ? JSON.stringify(body) : undefined,
     });
   } catch {
-    throw new ApiError(0, 'NETWORK', 'No internet connection. The books can only be read online.');
+    throw new ApiError(0, 'NETWORK', "Can't reach the server. Check your internet connection.");
+  } finally {
+    clearTimeout(timer);
   }
 
   const data = await res.json().catch(() => ({}));
@@ -43,5 +50,6 @@ export async function api(path, { method = 'GET', body } = {}) {
     if (res.status === 401 && authToken && onSessionEnded) onSessionEnded(err);
     throw err;
   }
+  if (authToken) lease.touch();
   return data;
 }

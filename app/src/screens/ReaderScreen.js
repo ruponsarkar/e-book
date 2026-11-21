@@ -5,6 +5,9 @@ import { StatusBar } from 'expo-status-bar';
 import * as SecureStore from 'expo-secure-store';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { api } from '../api';
+import { prefetch, useCached } from '../cache/useCached';
+import { vault } from '../cache/vault';
+import OfflineBanner from '../components/OfflineBanner';
 import { useAuth } from '../auth/AuthContext';
 import { useScreenshotReporter } from '../security';
 import Watermark from '../components/Watermark';
@@ -16,12 +19,19 @@ import { FAMILIES, THEMES, useReaderPrefs } from '../reader/theme';
 
 // Book pages are fetched live and kept only in memory: nothing is written to the phone.
 export default function ReaderScreen({ route, navigation }) {
-  const { slug, key, title: routeTitle, sections = [] } = route.params;
+  const { slug, key, title: routeTitle, v: version = null, sections = [] } = route.params;
   const { user } = useAuth();
   const insets = useSafeAreaInsets();
   const [prefs, updatePrefs] = useReaderPrefs();
-  const [section, setSection] = useState(null);
-  const [error, setError] = useState('');
+  const sectionPath = `/books/${slug}/sections/${key}`;
+  // Encrypted saved copy first; no download at all when it matches the contents list's version.
+  const { data: sectionData, error: loadError, offline } = useCached(sectionPath, {
+    book: slug,
+    version,
+    versionOf: (d) => d?.section?.v ?? null,
+  });
+  const section = sectionData?.section || null;
+  const error = loadError?.message || '';
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [picks, setPicks] = useState({});
   const [submitted, setSubmitted] = useState(false);
@@ -38,13 +48,6 @@ export default function ReaderScreen({ route, navigation }) {
     SecureStore.setItemAsync(`lastRead.${slug}`, key).catch(() => {});
   }, [slug, key]);
 
-  useEffect(() => {
-    setSection(null);
-    setError('');
-    api(`/books/${slug}/sections/${key}`)
-      .then((d) => setSection(d.section))
-      .catch((e) => setError(e.message));
-  }, [slug, key]);
 
   const parsed = useMemo(() => (section ? parseSection(section.markdown) : null), [section]);
   const opener = parsed?.blocks.find((b) => b.type === 'opener');
@@ -93,24 +96,47 @@ export default function ReaderScreen({ route, navigation }) {
   const [busy, setBusy] = useState(false);
   const testPath = `/progress/tests/${slug}/${key}`;
 
-  // Restore a sitting in progress and load past scores.
+  const draftKey = `draft:${testPath}`;
+  const toPicks = (answers) => Object.fromEntries(Object.entries(answers || {}).map(([k, v]) => [Number(k), v]));
+
+  // Restore a sitting in progress and load past scores. Answers are also kept (encrypted) on the
+  // phone, so a test can continue offline; the newer of the phone and server copies wins.
   useEffect(() => {
     if (mode !== 'test') return;
     let live = true;
-    api(testPath)
-      .then((d) => {
-        if (!live) return;
-        setHistory({ best: d.best, attempts: d.attempts });
-        if (d.draft) {
-          const saved = Object.fromEntries(Object.entries(d.draft.answers).map(([k, v]) => [Number(k), v]));
-          setPicks((p) => ({ ...saved, ...p }));
-          setSaveState('saved');
-        }
-      })
-      .catch(() => {});
+    (async () => {
+      const local = (await vault.get(draftKey))?.value || null;
+      const cached = (await vault.get(testPath))?.value || null;
+      let server = null;
+      try {
+        server = await api(testPath);
+        vault.set(testPath, server, { book: slug }).catch(() => {});
+      } catch {
+        // offline: fall back to what the phone has
+      }
+      if (!live) return;
+      const info = server || cached;
+      if (info) setHistory({ best: info.best, attempts: info.attempts });
+      const serverT = server?.draft ? new Date(server.draft.updatedAt).getTime() : 0;
+      if (local && local.t > serverT) {
+        setPicks((p) => ({ ...toPicks(local.answers), ...p }));
+        if (server) {
+          dirty.current = true; // phone has newer answers: push them
+          setSaveState('saving');
+          setTimeout(() => saveDraftRef.current?.(), 0);
+        } else setSaveState('local');
+      } else if (server?.draft) {
+        setPicks((p) => ({ ...toPicks(server.draft.answers), ...p }));
+        setSaveState('saved');
+      } else if (!server && cached?.draft) {
+        setPicks((p) => ({ ...toPicks(cached.draft.answers), ...p }));
+        setSaveState('local');
+      }
+    })();
     return () => {
       live = false;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mode, testPath]);
 
   // Save answers shortly after each change, and right away when leaving the screen.
@@ -123,13 +149,16 @@ export default function ReaderScreen({ route, navigation }) {
     dirty.current = false;
     setSaveState('saving');
     const answers = Object.fromEntries(Object.entries(latest.current).filter(([, v]) => v && v !== '?'));
+    vault.set(draftKey, { answers, t: Date.now() }, { book: slug }).catch(() => {});
     return api(`${testPath}/draft`, { method: 'PUT', body: { answers } })
       .then(() => setSaveState('saved'))
       .catch(() => {
-        dirty.current = true;
-        setSaveState('failed');
+        dirty.current = true; // retried with the next change or the next visit
+        setSaveState('local');
       });
-  }, [testPath]);
+  }, [testPath, draftKey, slug]);
+  const saveDraftRef = useRef(null);
+  saveDraftRef.current = saveDraft;
 
   useEffect(() => {
     if (mode !== 'test' || submitted || !dirty.current) return;
@@ -156,7 +185,16 @@ export default function ReaderScreen({ route, navigation }) {
   const idx = sections.findIndex((s) => s.key === key);
   const prev = idx > 0 ? sections[idx - 1] : null;
   const next = idx >= 0 && idx < sections.length - 1 ? sections[idx + 1] : null;
-  const go = (s) => navigation.replace('Reader', { slug, key: s.key, title: s.title, sections });
+  const go = (s) => navigation.replace('Reader', { slug, key: s.key, title: s.title, v: s.v, sections });
+
+  // Quietly save the next section too, so turning the page is instant (and works offline).
+  useEffect(() => {
+    if (!section || !next) return undefined;
+    const t = setTimeout(() => {
+      prefetch(`/books/${slug}/sections/${next.key}`, { book: slug, v: next.v }).catch(() => {});
+    }, 1500);
+    return () => clearTimeout(t);
+  }, [section, next, slug]);
 
   const answered = questions.filter((q) => picks[q.num] && picks[q.num] !== '?');
   const correct = answered.filter((q) => picks[q.num] === q.answer).length;
@@ -172,10 +210,13 @@ export default function ReaderScreen({ route, navigation }) {
         const answers = Object.fromEntries(answered.map((q) => [q.num, picks[q.num]]));
         const { attempt } = await api(`${testPath}/submit`, { method: 'POST', body: { answers } });
         setResult(attempt);
-        setHistory((h) => ({
-          best: Math.max(h?.best ?? 0, attempt.percent),
-          attempts: [attempt, ...(h?.attempts || [])],
-        }));
+        const nextHistory = {
+          best: Math.max(history?.best ?? 0, attempt.percent),
+          attempts: [attempt, ...(history?.attempts || [])],
+        };
+        setHistory(nextHistory);
+        vault.remove(draftKey).catch(() => {});
+        vault.set(testPath, { draft: null, ...nextHistory }, { book: slug }).catch(() => {});
         setSubmitted(true);
         scrollRef.current?.scrollTo({ y: 0, animated: true });
       } catch (e) {
@@ -192,7 +233,10 @@ export default function ReaderScreen({ route, navigation }) {
     } else doIt();
   };
   const reset = () => {
-    if (mode === 'test') api(`${testPath}/draft`, { method: 'DELETE' }).catch(() => {});
+    if (mode === 'test') {
+      api(`${testPath}/draft`, { method: 'DELETE' }).catch(() => {});
+      vault.remove(draftKey).catch(() => {});
+    }
     clearTimeout(saveTimer.current);
     saveTimer.current = null;
     dirty.current = false;
@@ -243,6 +287,7 @@ export default function ReaderScreen({ route, navigation }) {
           updateMax();
         }}
       >
+        {offline ? <OfflineBanner style={{ marginTop: 14, marginBottom: 0 }} dark={t.dark} /> : null}
         {mode === 'test' && submitted ? (
           <ScoreCard
             t={t}
@@ -354,8 +399,8 @@ export default function ReaderScreen({ route, navigation }) {
               <View style={{ flex: 1 }}>
                 <Text style={{ color: t.text, fontWeight: '700' }}>
                   {answered.length} / {questions.length} answered
-                  <Text style={{ color: saveState === 'failed' ? t.wrong : t.muted, fontWeight: '400', fontSize: 12 }}>
-                    {saveState === 'saving' ? '  · saving…' : saveState === 'saved' ? '  · saved' : saveState === 'failed' ? '  · not saved' : ''}
+                  <Text style={{ color: t.muted, fontWeight: '400', fontSize: 12 }}>
+                    {saveState === 'saving' ? '  · saving…' : saveState === 'saved' ? '  · saved' : saveState === 'local' ? '  · saved on phone' : ''}
                   </Text>
                 </Text>
                 <View style={[styles.miniTrack, { backgroundColor: t.border }]}>

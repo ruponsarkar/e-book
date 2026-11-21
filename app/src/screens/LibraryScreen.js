@@ -1,6 +1,7 @@
-import React, { useCallback, useEffect, useLayoutEffect, useState } from 'react';
-import { FlatList, Pressable, RefreshControl, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
-import { api } from '../api';
+import React, { useCallback, useLayoutEffect, useState } from 'react';
+import { ActivityIndicator, FlatList, Pressable, RefreshControl, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import { useCached } from '../cache/useCached';
+import OfflineBanner from '../components/OfflineBanner';
 import { useAuth } from '../auth/AuthContext';
 import BookCover, { PAPER, SERIF } from '../components/BookCover';
 
@@ -16,8 +17,8 @@ function initials(user) {
 export default function LibraryScreen({ navigation }) {
   const { user } = useAuth();
   const { width } = useWindowDimensions();
-  const [books, setBooks] = useState([]);
-  const [error, setError] = useState('');
+  const { data, error, offline, loading, reload } = useCached('/books');
+  const books = data?.books || [];
   const [refreshing, setRefreshing] = useState(false);
 
   // Two covers per row; the 6px leaves room for the page edges beside each cover.
@@ -33,22 +34,11 @@ export default function LibraryScreen({ navigation }) {
     });
   }, [navigation, user]);
 
-  const load = useCallback(async () => {
+  const refresh = useCallback(async () => {
     setRefreshing(true);
-    try {
-      const data = await api('/books');
-      setBooks(data.books);
-      setError('');
-    } catch (e) {
-      setError(e.message);
-    } finally {
-      setRefreshing(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    load();
-  }, [load]);
+    await reload();
+    setRefreshing(false);
+  }, [reload]);
 
   return (
     <FlatList
@@ -58,12 +48,19 @@ export default function LibraryScreen({ navigation }) {
       numColumns={2}
       columnWrapperStyle={{ gap: GAP }}
       keyExtractor={(b) => b.slug}
-      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={load} />}
-      ListHeaderComponent={<Text style={styles.hello}>Signed in as {user.email}</Text>}
+      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} />}
+      ListHeaderComponent={
+        <View>
+          {offline ? <OfflineBanner /> : null}
+          <Text style={styles.hello}>Signed in as {user.email}</Text>
+        </View>
+      }
       ListEmptyComponent={
-        !refreshing ? (
-          <Text style={styles.empty}>{error || 'No books on your account yet. Contact the publisher to get access.'}</Text>
-        ) : null
+        loading && !data ? (
+          <ActivityIndicator style={{ marginTop: 40 }} color="#d4b36a" />
+        ) : (
+          <Text style={styles.empty}>{error?.message || 'No books on your account yet. Contact the publisher to get access.'}</Text>
+        )
       }
       renderItem={({ item }) => (
         <Pressable

@@ -13,7 +13,7 @@ const router = express.Router();
 const loginLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 10, standardHeaders: true, legacyHeaders: false });
 
 function publicUser(user) {
-  return { id: user._id, name: user.name, email: user.email, role: user.role, books: user.books };
+  return { id: user._id, name: user.name, email: user.email, role: user.role, books: user.books, offlineDays: config.offlineDays };
 }
 
 function startSession(user, { deviceId, deviceName, platform }) {

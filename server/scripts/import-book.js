@@ -12,6 +12,7 @@
 // replaces the book's sections, so you can fix a chapter and import again.
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 const mongoose = require('mongoose');
 const config = require('../src/config');
 const { Book, Section } = require('../src/models/Book');
@@ -38,7 +39,8 @@ function readBook(dir) {
     const heading = markdown.match(/^#\s+(.+)$/m);
     const title = heading ? heading[1].trim() : path.basename(file, '.md');
     const key = path.basename(file, '.md').toLowerCase().replace(/[^a-z0-9]+/g, '-');
-    return { file, bookSlug: meta.slug, order: i, key, title, kind: kindFor(file), markdown };
+    const hash = crypto.createHash('sha256').update(markdown).digest('hex').slice(0, 16);
+    return { file, bookSlug: meta.slug, order: i, key, title, kind: kindFor(file), markdown, hash };
   });
   return { meta, sections };
 }

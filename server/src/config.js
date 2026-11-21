@@ -14,4 +14,7 @@ module.exports = {
   jwtSecret: required('JWT_SECRET'),
   jwtExpiresIn: process.env.JWT_EXPIRES_IN || '30d',
   allowSignup: process.env.ALLOW_SIGNUP === 'true',
+  // How many days the app may open downloaded (encrypted) books without reaching the server.
+  // After that the student must go online once so the account is re-checked.
+  offlineDays: Math.max(0, Number(process.env.OFFLINE_DAYS ?? 7)),
 };
