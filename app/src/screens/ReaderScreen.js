@@ -2,8 +2,12 @@ import React, { memo, useCallback, useLayoutEffect, useEffect, useMemo, useRef, 
 import { ActivityIndicator, Alert, Animated, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import Markdown from 'react-native-markdown-display';
 import { StatusBar } from 'expo-status-bar';
+import * as SecureStore from 'expo-secure-store';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { api } from '../api';
+import { prefetch, useCached } from '../cache/useCached';
+import { vault } from '../cache/vault';
+import OfflineBanner from '../components/OfflineBanner';
 import { useAuth } from '../auth/AuthContext';
 import { useScreenshotReporter } from '../security';
 import Watermark from '../components/Watermark';
@@ -15,12 +19,19 @@ import { FAMILIES, THEMES, useReaderPrefs } from '../reader/theme';
 
 // Book pages are fetched live and kept only in memory: nothing is written to the phone.
 export default function ReaderScreen({ route, navigation }) {
-  const { slug, key, title: routeTitle, sections = [] } = route.params;
+  const { slug, key, title: routeTitle, v: version = null, sections = [] } = route.params;
   const { user } = useAuth();
   const insets = useSafeAreaInsets();
   const [prefs, updatePrefs] = useReaderPrefs();
-  const [section, setSection] = useState(null);
-  const [error, setError] = useState('');
+  const sectionPath = `/books/${slug}/sections/${key}`;
+  // Encrypted saved copy first; no download at all when it matches the contents list's version.
+  const { data: sectionData, error: loadError, offline } = useCached(sectionPath, {
+    book: slug,
+    version,
+    versionOf: (d) => d?.section?.v ?? null,
+  });
+  const section = sectionData?.section || null;
+  const error = loadError?.message || '';
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [picks, setPicks] = useState({});
   const [submitted, setSubmitted] = useState(false);
@@ -32,13 +43,11 @@ export default function ReaderScreen({ route, navigation }) {
 
   useScreenshotReporter(slug, key);
 
+  // Remembers which section was open (just its key, never its text) for "Continue reading".
   useEffect(() => {
-    setSection(null);
-    setError('');
-    api(`/books/${slug}/sections/${key}`)
-      .then((d) => setSection(d.section))
-      .catch((e) => setError(e.message));
+    SecureStore.setItemAsync(`lastRead.${slug}`, key).catch(() => {});
   }, [slug, key]);
+
 
   const parsed = useMemo(() => (section ? parseSection(section.markdown) : null), [section]);
   const opener = parsed?.blocks.find((b) => b.type === 'opener');
@@ -74,9 +83,94 @@ export default function ReaderScreen({ route, navigation }) {
   const contentH = useRef(0);
   const updateMax = () => maxScroll.setValue(Math.max(1, contentH.current - layoutH.current));
 
-  const onPick = useCallback(
-    (num, letter) => setPicks((p) => ({ ...p, [num]: letter })),
-    []
+  const dirty = useRef(false);
+  const onPick = useCallback((num, letter) => {
+    dirty.current = true;
+    setPicks((p) => ({ ...p, [num]: letter }));
+  }, []);
+
+  // ---- Test papers: answers and results live on the server ----
+  const [history, setHistory] = useState(null); // { best, attempts: [...] }
+  const [result, setResult] = useState(null); // server-graded attempt just submitted
+  const [saveState, setSaveState] = useState('idle'); // idle | saving | saved | failed
+  const [busy, setBusy] = useState(false);
+  const testPath = `/progress/tests/${slug}/${key}`;
+
+  const draftKey = `draft:${testPath}`;
+  const toPicks = (answers) => Object.fromEntries(Object.entries(answers || {}).map(([k, v]) => [Number(k), v]));
+
+  // Restore a sitting in progress and load past scores. Answers are also kept (encrypted) on the
+  // phone, so a test can continue offline; the newer of the phone and server copies wins.
+  useEffect(() => {
+    if (mode !== 'test') return;
+    let live = true;
+    (async () => {
+      const local = (await vault.get(draftKey))?.value || null;
+      const cached = (await vault.get(testPath))?.value || null;
+      let server = null;
+      try {
+        server = await api(testPath);
+        vault.set(testPath, server, { book: slug }).catch(() => {});
+      } catch {
+        // offline: fall back to what the phone has
+      }
+      if (!live) return;
+      const info = server || cached;
+      if (info) setHistory({ best: info.best, attempts: info.attempts });
+      const serverT = server?.draft ? new Date(server.draft.updatedAt).getTime() : 0;
+      if (local && local.t > serverT) {
+        setPicks((p) => ({ ...toPicks(local.answers), ...p }));
+        if (server) {
+          dirty.current = true; // phone has newer answers: push them
+          setSaveState('saving');
+          setTimeout(() => saveDraftRef.current?.(), 0);
+        } else setSaveState('local');
+      } else if (server?.draft) {
+        setPicks((p) => ({ ...toPicks(server.draft.answers), ...p }));
+        setSaveState('saved');
+      } else if (!server && cached?.draft) {
+        setPicks((p) => ({ ...toPicks(cached.draft.answers), ...p }));
+        setSaveState('local');
+      }
+    })();
+    return () => {
+      live = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode, testPath]);
+
+  // Save answers shortly after each change, and right away when leaving the screen.
+  const latest = useRef(picks);
+  latest.current = picks;
+  const saveTimer = useRef(null);
+  const saveDraft = useCallback(() => {
+    clearTimeout(saveTimer.current);
+    saveTimer.current = null;
+    dirty.current = false;
+    setSaveState('saving');
+    const answers = Object.fromEntries(Object.entries(latest.current).filter(([, v]) => v && v !== '?'));
+    vault.set(draftKey, { answers, t: Date.now() }, { book: slug }).catch(() => {});
+    return api(`${testPath}/draft`, { method: 'PUT', body: { answers } })
+      .then(() => setSaveState('saved'))
+      .catch(() => {
+        dirty.current = true; // retried with the next change or the next visit
+        setSaveState('local');
+      });
+  }, [testPath, draftKey, slug]);
+  const saveDraftRef = useRef(null);
+  saveDraftRef.current = saveDraft;
+
+  useEffect(() => {
+    if (mode !== 'test' || submitted || !dirty.current) return;
+    clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(saveDraft, 800);
+  }, [picks, mode, submitted, saveDraft]);
+
+  useEffect(
+    () => () => {
+      if (saveTimer.current || dirty.current) saveDraft();
+    },
+    [saveDraft]
   );
 
   const md = useMemo(() => markdownStyles(t, size, font), [t, size, font]);
@@ -91,16 +185,45 @@ export default function ReaderScreen({ route, navigation }) {
   const idx = sections.findIndex((s) => s.key === key);
   const prev = idx > 0 ? sections[idx - 1] : null;
   const next = idx >= 0 && idx < sections.length - 1 ? sections[idx + 1] : null;
-  const go = (s) => navigation.replace('Reader', { slug, key: s.key, title: s.title, sections });
+  const go = (s) => navigation.replace('Reader', { slug, key: s.key, title: s.title, v: s.v, sections });
+
+  // Quietly save the next section too, so turning the page is instant (and works offline).
+  useEffect(() => {
+    if (!section || !next) return undefined;
+    const t = setTimeout(() => {
+      prefetch(`/books/${slug}/sections/${next.key}`, { book: slug, v: next.v }).catch(() => {});
+    }, 1500);
+    return () => clearTimeout(t);
+  }, [section, next, slug]);
 
   const answered = questions.filter((q) => picks[q.num] && picks[q.num] !== '?');
   const correct = answered.filter((q) => picks[q.num] === q.answer).length;
 
   const submit = () => {
     const left = questions.length - answered.length;
-    const doIt = () => {
-      setSubmitted(true);
-      scrollRef.current?.scrollTo({ y: 0, animated: true });
+    const doIt = async () => {
+      clearTimeout(saveTimer.current);
+      saveTimer.current = null;
+      dirty.current = false;
+      setBusy(true);
+      try {
+        const answers = Object.fromEntries(answered.map((q) => [q.num, picks[q.num]]));
+        const { attempt } = await api(`${testPath}/submit`, { method: 'POST', body: { answers } });
+        setResult(attempt);
+        const nextHistory = {
+          best: Math.max(history?.best ?? 0, attempt.percent),
+          attempts: [attempt, ...(history?.attempts || [])],
+        };
+        setHistory(nextHistory);
+        vault.remove(draftKey).catch(() => {});
+        vault.set(testPath, { draft: null, ...nextHistory }, { book: slug }).catch(() => {});
+        setSubmitted(true);
+        scrollRef.current?.scrollTo({ y: 0, animated: true });
+      } catch (e) {
+        Alert.alert('Could not submit', `${e.message}\n\nYour answers are kept; try again.`);
+      } finally {
+        setBusy(false);
+      }
     };
     if (left > 0) {
       Alert.alert('Submit test?', `${left} question${left > 1 ? 's are' : ' is'} unanswered.`, [
@@ -110,8 +233,17 @@ export default function ReaderScreen({ route, navigation }) {
     } else doIt();
   };
   const reset = () => {
+    if (mode === 'test') {
+      api(`${testPath}/draft`, { method: 'DELETE' }).catch(() => {});
+      vault.remove(draftKey).catch(() => {});
+    }
+    clearTimeout(saveTimer.current);
+    saveTimer.current = null;
+    dirty.current = false;
     setPicks({});
     setSubmitted(false);
+    setResult(null);
+    setSaveState('idle');
     scrollRef.current?.scrollTo({ y: 0, animated: true });
   };
 
@@ -155,14 +287,24 @@ export default function ReaderScreen({ route, navigation }) {
           updateMax();
         }}
       >
+        {offline ? <OfflineBanner style={{ marginTop: 14, marginBottom: 0 }} dark={t.dark} /> : null}
         {mode === 'test' && submitted ? (
-          <ScoreCard t={t} font={font} correct={correct} total={questions.length} answered={answered.length} onReset={reset} />
+          <ScoreCard
+            t={t}
+            font={font}
+            correct={result?.correct ?? correct}
+            wrong={result?.wrong ?? answered.length - correct}
+            total={result?.total ?? questions.length}
+            best={history?.best}
+            tries={history?.attempts.length}
+            onReset={reset}
+          />
         ) : null}
 
         {parsed.blocks.map((b, i) => {
           switch (b.type) {
             case 'opener':
-              return <Opener key={i} b={b} t={t} isTest={mode === 'test'} count={questions.length} />;
+              return <Opener key={i} b={b} t={t} isTest={mode === 'test'} count={questions.length} history={history} />;
             case 'h2':
               return <SectionHeading key={i} b={b} t={t} size={size} />;
             case 'h3':
@@ -246,7 +388,7 @@ export default function ReaderScreen({ route, navigation }) {
           {submitted ? (
             <>
               <Text style={{ flex: 1, color: t.text, fontFamily: FAMILIES.serif, fontSize: 17 }}>
-                Score {correct}/{questions.length}
+                Score {result?.correct ?? correct}/{result?.total ?? questions.length}
               </Text>
               <Pressable onPress={reset} style={[styles.primaryBtn, { backgroundColor: t.text }]}>
                 <Text style={[styles.primaryText, { color: t.bg }]}>Retake</Text>
@@ -257,6 +399,9 @@ export default function ReaderScreen({ route, navigation }) {
               <View style={{ flex: 1 }}>
                 <Text style={{ color: t.text, fontWeight: '700' }}>
                   {answered.length} / {questions.length} answered
+                  <Text style={{ color: t.muted, fontWeight: '400', fontSize: 12 }}>
+                    {saveState === 'saving' ? '  · saving…' : saveState === 'saved' ? '  · saved' : saveState === 'local' ? '  · saved on phone' : ''}
+                  </Text>
                 </Text>
                 <View style={[styles.miniTrack, { backgroundColor: t.border }]}>
                   <View
@@ -269,10 +414,10 @@ export default function ReaderScreen({ route, navigation }) {
               </View>
               <Pressable
                 onPress={submit}
-                disabled={answered.length === 0}
-                style={[styles.primaryBtn, { backgroundColor: t.accent, opacity: answered.length ? 1 : 0.4 }]}
+                disabled={answered.length === 0 || busy}
+                style={[styles.primaryBtn, { backgroundColor: t.accent, opacity: answered.length && !busy ? 1 : 0.4 }]}
               >
-                <Text style={[styles.primaryText, { color: '#fff' }]}>Submit</Text>
+                {busy ? <ActivityIndicator color="#fff" /> : <Text style={[styles.primaryText, { color: '#fff' }]}>Submit</Text>}
               </Pressable>
             </>
           )}
@@ -294,7 +439,7 @@ const MdBlock = memo(function MdBlock({ text, md, rules }) {
   );
 });
 
-function Opener({ b, t, isTest, count }) {
+function Opener({ b, t, isTest, count, history }) {
   return (
     <View style={styles.opener}>
       {b.en.label ? <Text style={[styles.openerLabel, { color: t.accent }]}>{b.en.label.toUpperCase()}</Text> : null}
@@ -318,6 +463,12 @@ function Opener({ b, t, isTest, count }) {
           </Text>
         </View>
       ) : null}
+      {isTest && history?.attempts.length ? (
+        <Text style={{ color: t.muted, marginTop: 10, fontSize: 13 }}>
+          Last {history.attempts[0].percent}% · Best {history.best}% · {history.attempts.length} attempt
+          {history.attempts.length === 1 ? '' : 's'}
+        </Text>
+      ) : null}
     </View>
   );
 }
@@ -336,15 +487,20 @@ function SectionHeading({ b, t, size }) {
   );
 }
 
-function ScoreCard({ t, font, correct, total, answered, onReset }) {
+function ScoreCard({ t, font, correct, wrong, total, best, tries, onReset }) {
   const pct = total ? Math.round((correct / total) * 100) : 0;
   return (
     <View style={[styles.score, { backgroundColor: t.surface, borderColor: t.accent }]}>
       <Text style={[styles.practiceLabel, { color: t.accent }]}>YOUR RESULT</Text>
       <Text style={{ fontFamily: FAMILIES.serif, fontSize: 44, color: t.text, marginTop: 4 }}>{pct}%</Text>
       <Text style={{ color: t.text, fontFamily: font, fontSize: 16 }}>
-        {correct} correct · {answered - correct} wrong · {total - answered} skipped
+        {correct} correct · {wrong} wrong · {total - correct - wrong} skipped
       </Text>
+      {best != null ? (
+        <Text style={{ color: t.muted, marginTop: 6, fontSize: 13 }}>
+          Best {best}% · {tries} attempt{tries === 1 ? '' : 's'} · saved to your profile
+        </Text>
+      ) : null}
       <Text style={{ color: t.muted, marginTop: 6, fontSize: 13 }}>Scroll down to review each answer.</Text>
       <Pressable onPress={onReset} style={[styles.ghostBtn, { borderColor: t.border }]}>
         <Text style={{ color: t.text, fontWeight: '600' }}>Retake test</Text>

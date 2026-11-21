@@ -3,18 +3,19 @@
 Two parts:
 
 - `server/` is a Node.js + MongoDB API. It handles login, keeps **one active phone per account**, and serves book content one section at a time to signed-in users who have access.
-- `app/` is a React Native (Expo) app. It has login, a library, a table of contents and a reader. It **blocks screenshots and screen recording**, adds a watermark and stores nothing offline.
+- `app/` is a React Native (Expo) app. It has login, a library, a table of contents and a reader. It **blocks screenshots and screen recording**, adds a watermark, and keeps an **encrypted** offline copy of books for a limited time.
 
 ## How the protections work
 
 | Requirement | How it is done |
 |---|---|
-| Read only inside the app | Content lives only on the server. The app fetches one section at a time into memory, and responses carry `Cache-Control: no-store`. There is no export, download or offline copy, and text can't be selected or copied. |
+| Read only inside the app | Text can't be selected or copied, and there is no export. Sections the student opens (or downloads with **Download for offline**) are saved on the phone **encrypted** with XChaCha20-Poly1305; the key is random per install and kept in the Android Keystore / iOS Keychain, and file names are hashed so nothing on disk names a book or chapter. Server responses still carry `Cache-Control: no-store`. |
+| Offline limit | Saved books open without internet only for `OFFLINE_DAYS` (default 7) after the app last reached the server; after that the student must go online once. The saved copy is **wiped** on logout, when the account signs in on another phone, when another account logs in, and per book when access is removed. |
 | One login at a time | Each login creates a new session id, saved on the user record and inside the token. Every request checks that the token's session is still the active one. When the account logs in on phone B, phone A gets `SESSION_REPLACED` on its next request (it checks on opening, on returning to the app and every 60 s) and is signed out with a message. |
 | No screenshots | **Android:** `FLAG_SECURE`, so screenshots and recordings come out black and the recent-apps preview is blank. **iOS:** `expo-screen-capture` prevents capture where the iOS/Expo version supports it, and every screenshot is otherwise *detected* and reported to the server (`GET /admin/screenshot-events`). A cover screen hides the page in the app switcher. |
 | Deterrence | Every page has a faint watermark with the reader's email, so a photo taken with another phone shows whose account leaked it. |
 
-**What no app can stop:** someone photographing the screen with a second phone, and rooted or jailbroken phones that disable `FLAG_SECURE`. The watermark and the screenshot log are there for those cases.
+**What no app can stop:** someone with a rooted phone and real skill could, in principle, read the offline key from memory and decrypt saved books — set `OFFLINE_DAYS=0` if you'd rather never store books on the phone. Also someone photographing the screen with a second phone, and rooted or jailbroken phones that disable `FLAG_SECURE`. The watermark and the screenshot log are there for those cases.
 
 ## 1. Run the server
 
@@ -27,6 +28,15 @@ npm install
 npm run create-admin -- you@example.com "YourStrongPassword"
 npm start                     # → E-book API listening on port 4000
 ```
+
+Check that it's working:
+
+```bash
+npm run health                                  # local server
+npm run health -- https://api.yourdomain.com    # a deployed server
+```
+
+Or open `http://localhost:4000/health` in a browser. It returns `200` with the version, uptime and database ping, or `503` if MongoDB can't be reached. Uptime monitors (UptimeRobot, Render health checks) can use the same URL.
 
 Deploy it to any Node host (Render, Railway, a VPS behind Nginx) with **HTTPS**. The app must talk to the server over https.
 
@@ -128,7 +138,8 @@ npm install -g eas-cli && eas build -p android   # and -p ios
 - Log in on phone A, then on phone B with the same account. Phone A shows "Signed out … another phone" within a minute, or immediately when it's reopened.
 - Try a screenshot on Android: you get a black image or a "can't take screenshot" message.
 - On iOS, take a screenshot, then check `GET /admin/screenshot-events`.
-- Turn off the internet: the reader shows "books can only be read online" and nothing is cached.
+- Open a book and tap **Download**, then turn off the internet: the library, contents and chapters still open, with an "Offline" banner. Sections never opened or downloaded show "Can't reach the server".
+- Log out (or sign in on another phone): the saved copies are deleted.
 
 ## Files
 
@@ -142,6 +153,9 @@ server/
   src/routes/auth.js        login, me, logout (+ optional signup)
   src/routes/books.js       library, contents, section, screenshot report
   src/routes/admin.js       users, access, sessions, screenshot log
+  src/routes/progress.js    test-paper answers & scores, profile
+  src/lib/testKey.js        grades test papers from their own answer key
+  src/models/TestAttempt.js saved answers (in progress) and submitted results
   scripts/create-admin.js
   scripts/import-book.js
   scripts/grant-books.js    give a student access to books
@@ -157,4 +171,8 @@ app/
 ```
 
 
+use ebook_db
+db.createUser({user: "ebookuser", pwd: "EbookStrongPassword456", roles: [{role: "readWrite", db: "ebook_db"}]})
+mongosh -u ebookuser -p --authenticationDatabase ebook_db
+password: EbookStrongPassword456
 adb reverse tcp:4000 tcp:4000 

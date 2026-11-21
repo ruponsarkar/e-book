@@ -1,17 +1,24 @@
-import React, { useCallback, useEffect, useLayoutEffect, useState } from 'react';
-import { FlatList, Pressable, RefreshControl, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
-import { api } from '../api';
+import React, { useCallback, useLayoutEffect, useState } from 'react';
+import { ActivityIndicator, FlatList, Pressable, RefreshControl, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import { useCached } from '../cache/useCached';
+import OfflineBanner from '../components/OfflineBanner';
 import { useAuth } from '../auth/AuthContext';
 import BookCover, { PAPER, SERIF } from '../components/BookCover';
 
 const PADDING = 16;
 const GAP = 20;
 
+function initials(user) {
+  const src = (user.name || user.email.split('@')[0]).trim();
+  const parts = src.split(/[\s._-]+/).filter(Boolean);
+  return ((parts[0]?.[0] || '') + (parts[1]?.[0] || '')).toUpperCase() || '?';
+}
+
 export default function LibraryScreen({ navigation }) {
-  const { user, logout } = useAuth();
+  const { user } = useAuth();
   const { width } = useWindowDimensions();
-  const [books, setBooks] = useState([]);
-  const [error, setError] = useState('');
+  const { data, error, offline, loading, reload } = useCached('/books');
+  const books = data?.books || [];
   const [refreshing, setRefreshing] = useState(false);
 
   // Two covers per row; the 6px leaves room for the page edges beside each cover.
@@ -20,29 +27,18 @@ export default function LibraryScreen({ navigation }) {
   useLayoutEffect(() => {
     navigation.setOptions({
       headerRight: () => (
-        <Pressable onPress={logout} hitSlop={10}>
-          <Text style={{ color: '#1f3a5f', fontWeight: '600' }}>Log out</Text>
+        <Pressable onPress={() => navigation.navigate('Profile')} hitSlop={10} style={styles.avatar}>
+          <Text style={styles.avatarText}>{initials(user)}</Text>
         </Pressable>
       ),
     });
-  }, [navigation, logout]);
+  }, [navigation, user]);
 
-  const load = useCallback(async () => {
+  const refresh = useCallback(async () => {
     setRefreshing(true);
-    try {
-      const data = await api('/books');
-      setBooks(data.books);
-      setError('');
-    } catch (e) {
-      setError(e.message);
-    } finally {
-      setRefreshing(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    load();
-  }, [load]);
+    await reload();
+    setRefreshing(false);
+  }, [reload]);
 
   return (
     <FlatList
@@ -52,12 +48,19 @@ export default function LibraryScreen({ navigation }) {
       numColumns={2}
       columnWrapperStyle={{ gap: GAP }}
       keyExtractor={(b) => b.slug}
-      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={load} />}
-      ListHeaderComponent={<Text style={styles.hello}>Signed in as {user.email}</Text>}
+      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} />}
+      ListHeaderComponent={
+        <View>
+          {offline ? <OfflineBanner /> : null}
+          <Text style={styles.hello}>Signed in as {user.email}</Text>
+        </View>
+      }
       ListEmptyComponent={
-        !refreshing ? (
-          <Text style={styles.empty}>{error || 'No books on your account yet. Contact the publisher to get access.'}</Text>
-        ) : null
+        loading && !data ? (
+          <ActivityIndicator style={{ marginTop: 40 }} color="#d4b36a" />
+        ) : (
+          <Text style={styles.empty}>{error?.message || 'No books on your account yet. Contact the publisher to get access.'}</Text>
+        )
       }
       renderItem={({ item }) => (
         <Pressable
@@ -77,6 +80,17 @@ export default function LibraryScreen({ navigation }) {
 }
 
 const styles = StyleSheet.create({
+  avatar: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: '#1f3a5f',
+    borderWidth: 1.5,
+    borderColor: '#d4b36a',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  avatarText: { color: '#d4b36a', fontWeight: '800', fontSize: 13, fontFamily: SERIF },
   hello: { color: '#8a7a5c', marginBottom: 16 },
   empty: { color: '#667', textAlign: 'center', marginTop: 40 },
   item: { marginBottom: 24 },

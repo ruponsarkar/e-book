@@ -3,6 +3,8 @@ import { Alert, AppState } from 'react-native';
 import * as SecureStore from 'expo-secure-store';
 import { api, setSessionEndedHandler, setToken } from '../api';
 import { getDeviceInfo } from '../device';
+import { lease } from '../cache/lease';
+import { vault } from '../cache/vault';
 
 const TOKEN_KEY = 'auth_token';
 const CHECK_EVERY_MS = 60 * 1000;
@@ -13,11 +15,23 @@ export function AuthProvider({ children }) {
   const [loading, setLoading] = useState(true);
   const signedIn = useRef(false);
 
+  // Signing out (or being signed out) also destroys the encrypted book cache and its key.
   const clearLocal = useCallback(async () => {
     signedIn.current = false;
     setToken(null);
     setUser(null);
     await SecureStore.deleteItemAsync(TOKEN_KEY);
+    await vault.wipe();
+    await lease.clear();
+  }, []);
+
+  // Keeps the cache in step with the account: saved profile for offline starts,
+  // the server's offline limit, and no saved copies of books the account lost access to.
+  const syncAccount = useCallback(async (me) => {
+    await vault.init(me.id);
+    lease.setDays(me.offlineDays);
+    vault.set('me', me).catch(() => {});
+    if (me.role !== 'admin') vault.pruneBooks(me.books || []).catch(() => {});
   }, []);
 
   // Called by api.js on any 401 while signed in.
@@ -35,50 +49,79 @@ export function AuthProvider({ children }) {
   }, [clearLocal]);
 
   // Restore a saved login on app start, and confirm it is still the active session.
+  // Without internet, the saved profile is used while the offline lease lasts.
   useEffect(() => {
     (async () => {
+      await lease.load();
+      let token = null;
       try {
-        const token = await SecureStore.getItemAsync(TOKEN_KEY);
+        token = await SecureStore.getItemAsync(TOKEN_KEY);
         if (token) {
           setToken(token);
           signedIn.current = true;
           const { user: me } = await api('/auth/me');
+          await syncAccount(me);
           setUser(me);
         }
-      } catch {
-        // api.js already signed out on 401; on a network error keep the user out until online.
-        signedIn.current = false;
-        setToken(null);
+      } catch (e) {
+        let restored = false;
+        if (token && e.code === 'NETWORK' && lease.ok()) {
+          const ownerId = await vault.savedOwner();
+          if (ownerId) {
+            await vault.init(ownerId);
+            const saved = await vault.get('me');
+            if (saved?.value) {
+              setUser(saved.value);
+              restored = true;
+            }
+          }
+        }
+        if (!restored) {
+          // api.js already signed out on a 401; otherwise wait until the phone is online.
+          signedIn.current = false;
+          setToken(null);
+        }
       } finally {
         setLoading(false);
       }
     })();
-  }, []);
+  }, [syncAccount]);
 
   // Re-check the session when the app comes back to the foreground and once a minute,
   // so the old phone is signed out soon after a login elsewhere.
   useEffect(() => {
     if (!user) return undefined;
-    const check = () => api('/auth/me').catch(() => {});
+    const check = () =>
+      api('/auth/me')
+        .then(async ({ user: me }) => {
+          await syncAccount(me);
+          setUser((u) => (JSON.stringify(u) === JSON.stringify(me) ? u : me));
+        })
+        .catch(() => {});
     const timer = setInterval(check, CHECK_EVERY_MS);
     const sub = AppState.addEventListener('change', (state) => state === 'active' && check());
     return () => {
       clearInterval(timer);
       sub.remove();
     };
-  }, [user]);
+  }, [user, syncAccount]);
 
-  const login = useCallback(async (email, password) => {
-    const device = await getDeviceInfo();
-    const data = await api('/auth/login', { method: 'POST', body: { email, password, ...device } });
-    await SecureStore.setItemAsync(TOKEN_KEY, data.token);
-    setToken(data.token);
-    signedIn.current = true;
-    setUser(data.user);
-    if (data.replacedOtherDevice) {
-      Alert.alert('Signed in', 'Your account has been signed out on your other phone.');
-    }
-  }, []);
+  const login = useCallback(
+    async (email, password) => {
+      const device = await getDeviceInfo();
+      const data = await api('/auth/login', { method: 'POST', body: { email, password, ...device } });
+      await SecureStore.setItemAsync(TOKEN_KEY, data.token);
+      setToken(data.token);
+      signedIn.current = true;
+      lease.touch();
+      await syncAccount(data.user); // a different account's cache is wiped here
+      setUser(data.user);
+      if (data.replacedOtherDevice) {
+        Alert.alert('Signed in', 'Your account has been signed out on your other phone.');
+      }
+    },
+    [syncAccount]
+  );
 
   const logout = useCallback(async () => {
     try {
@@ -89,7 +132,18 @@ export function AuthProvider({ children }) {
     await clearLocal();
   }, [clearLocal]);
 
-  return <AuthContext.Provider value={{ user, loading, login, logout }}>{children}</AuthContext.Provider>;
+  // Fetches the account again now (used by "Sync latest" on the profile).
+  const refreshAccount = useCallback(async () => {
+    const { user: me } = await api('/auth/me');
+    await syncAccount(me);
+    setUser((u) => (JSON.stringify(u) === JSON.stringify(me) ? u : me));
+    return me;
+  }, [syncAccount]);
+
+  // Local update after the profile is edited (e.g. a new name).
+  const updateUser = useCallback((patch) => setUser((u) => (u ? { ...u, ...patch } : u)), []);
+
+  return <AuthContext.Provider value={{ user, loading, login, logout, updateUser, refreshAccount }}>{children}</AuthContext.Provider>;
 }
 
 export function useAuth() {
