@@ -8,6 +8,7 @@
     "start": "node src/index.js",
     "dev": "node --watch src/index.js",
     "create-admin": "node scripts/create-admin.js",
+    "add-student": "node scripts/add-student.js",
     "import-book": "node scripts/import-book.js",
     "grant-books": "node scripts/grant-books.js",
     "import-all": "node scripts/import-all.js",

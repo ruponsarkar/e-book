@@ -58,7 +58,19 @@ Deploy it to any Node host (Render, Railway, a VPS behind Nginx) with **HTTPS**.
 
 ## 3. Create student accounts
 
-Accounts are created by you, not by students (set `ALLOW_SIGNUP=true` to change that). First log in as admin to get a token:
+Accounts are created by you, not by students (set `ALLOW_SIGNUP=true` to change that).
+
+The quickest way is from the `server` folder (on the machine whose `.env` points at your database):
+
+```bash
+npm run add-student -- student@example.com "Pass12345" --all --name "Rahul Das"   # every published book
+npm run add-student -- student@example.com "Pass12345" assam-gk general-english   # chosen books
+npm run add-student -- student@example.com "Pass12345"                            # no books yet
+```
+
+The password needs 8+ characters. Book slugs are listed by `npm run grant-books -- --list`.
+
+Or use the API from anywhere. First log in as admin to get a token:
 
 ```bash
 TOKEN=$(curl -s -X POST https://api.your-domain.com/auth/login \
