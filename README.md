@@ -29,6 +29,15 @@ npm run create-admin -- you@example.com "YourStrongPassword"
 npm start                     # → E-book API listening on port 4000
 ```
 
+Check that it's working:
+
+```bash
+npm run health                                  # local server
+npm run health -- https://api.yourdomain.com    # a deployed server
+```
+
+Or open `http://localhost:4000/health` in a browser. It returns `200` with the version, uptime and database ping, or `503` if MongoDB can't be reached. Uptime monitors (UptimeRobot, Render health checks) can use the same URL.
+
 Deploy it to any Node host (Render, Railway, a VPS behind Nginx) with **HTTPS**. The app must talk to the server over https.
 
 ## 2. Load a book
@@ -162,4 +171,8 @@ app/
 ```
 
 
+use ebook_db
+db.createUser({user: "ebookuser", pwd: "EbookStrongPassword456", roles: [{role: "readWrite", db: "ebook_db"}]})
+mongosh -u ebookuser -p --authenticationDatabase ebook_db
+password: EbookStrongPassword456
 adb reverse tcp:4000 tcp:4000 
