@@ -99,7 +99,7 @@ function QuestionCard({ q, t, size, font, mode, pick, submitted, onPick, renderT
       {exams || id ? (
         <View style={[styles.foot, { borderTopColor: t.border }]}>
           <Text style={[styles.footText, { color: t.muted }]} numberOfLines={2}>
-            {exams ? `Asked in ${exams.split(/,\s*/).join(' · ')}` : ''}
+            {exams ? `Important for ${exams.split(/,\s*/).join(' · ')}` : ''}
           </Text>
           {id ? <Text style={[styles.footId, { color: t.muted }]}>{id}</Text> : null}
         </View>

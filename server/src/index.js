@@ -2,11 +2,18 @@ const express = require('express');
 const helmet = require('helmet');
 const cors = require('cors');
 const mongoose = require('mongoose');
+const path = require('path');
+const fs = require('fs');
 const config = require('./config');
 
 const app = express();
 app.set('trust proxy', 1); // needed for correct rate limiting behind Nginx/Render/Railway
-app.use(helmet());
+app.use(
+  helmet({
+    // The server may be reached over plain http (by IP); don't force the admin panel's files onto https.
+    contentSecurityPolicy: { directives: { upgradeInsecureRequests: null } },
+  })
+);
 app.use(cors()); // the mobile app does not send an Origin; tighten this if you add a web admin panel
 app.use(express.json({ limit: '1mb' }));
 
@@ -15,7 +22,7 @@ const { version } = require('../package.json');
 const started = Date.now();
 const DB_STATES = ['disconnected', 'connected', 'connecting', 'disconnecting'];
 
-app.get('/', (req, res) => res.json({ name: 'E-book API', version, health: '/health' }));
+app.get('/', (req, res) => res.json({ name: 'E-book API', version, health: '/health', adminPanel: '/panel/' }));
 
 app.get('/health', async (req, res) => {
   const t0 = Date.now();
@@ -41,6 +48,17 @@ app.use('/auth', require('./routes/auth'));
 app.use('/books', require('./routes/books'));
 app.use('/admin', require('./routes/admin'));
 app.use('/progress', require('./routes/progress'));
+app.use('/activity', require('./routes/activity'));
+app.use('/queries', require('./routes/queries'));
+app.use('/notifications', require('./routes/notifications'));
+
+// Admin panel (built from ../admin with `npm run build` there), at /panel.
+const panel = path.join(__dirname, '../../admin/dist');
+if (fs.existsSync(panel)) {
+  app.use('/panel', express.static(panel, { index: 'index.html', maxAge: '1h' }));
+} else {
+  app.get('/panel', (req, res) => res.status(404).send('Admin panel not built. Run: cd admin && npm install && npm run build'));
+}
 
 app.use((err, req, res, next) => {
   console.error(err);

@@ -12,7 +12,8 @@
     "import-book": "node scripts/import-book.js",
     "grant-books": "node scripts/grant-books.js",
     "import-all": "node scripts/import-all.js",
-    "health": "node scripts/health.js"
+    "health": "node scripts/health.js",
+    "build-panel": "cd ../admin && npm install && npm run build"
   },
   "engines": {
     "node": ">=18"

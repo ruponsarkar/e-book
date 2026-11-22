@@ -10,6 +10,7 @@ import { vault } from '../cache/vault';
 import OfflineBanner from '../components/OfflineBanner';
 import { useAuth } from '../auth/AuthContext';
 import { useScreenshotReporter } from '../security';
+import { useReadingTracking } from '../activity';
 import Watermark from '../components/Watermark';
 import { parseSection } from '../reader/parse';
 import { isMostlyBengali } from '../reader/Inline';
@@ -42,6 +43,7 @@ export default function ReaderScreen({ route, navigation }) {
   const size = prefs.size;
 
   useScreenshotReporter(slug, key);
+  useReadingTracking(slug, key);
 
   // Remembers which section was open (just its key, never its text) for "Continue reading".
   useEffect(() => {

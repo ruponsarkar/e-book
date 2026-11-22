@@ -153,6 +153,33 @@ npm install -g eas-cli && eas build -p android   # and -p ios
 - Open a book and tap **Download**, then turn off the internet: the library, contents and chapters still open, with an "Offline" banner. Sections never opened or downloaded show "Can't reach the server".
 - Log out (or sign in on another phone): the saved copies are deleted.
 
+## 5. Admin panel (website)
+
+The server hosts an admin website at **`/panel/`**, for example `http://72.62.75.203:4000/panel/`. Build it once, and again after updating the code:
+
+```bash
+cd server
+npm run build-panel      # installs and builds ../admin into admin/dist
+npm start                # restart so the server picks it up
+```
+
+Sign in with an admin account (`npm run create-admin`). The panel has its own session, so it doesn't sign you out of the app on your phone.
+
+| Page | What you can do |
+|---|---|
+| Dashboard | Students, active today/this week, time in the app, open queries, 14-day charts, latest activity |
+| Students | Search; add a student (random password + copyable login details); per student: books, name, password reset, sign out of phone, disable, delete, time per day, most-read chapters, test results, activity, queries, send a notification |
+| Books & questions | Create books, publish/hide, edit details; per book: upload `.md` files, add/edit/delete/reorder chapters and test papers in a Markdown editor with live preview, **+ Insert question** template, and a checker that counts questions and finds missing answer-key entries |
+| Queries | Messages students send from the app (Profile → Help & feedback). Reply (the student gets a notification), close or re-open |
+| Activity | Every login, logout, app session, reading time per chapter, test submission, query and screenshot attempt; filter by student or type |
+| Notifications | Send to all students or chosen ones; see how many have read each one; delete |
+
+Edits made in the panel change the section's version, so phones download the new text on their next sync.
+
+To work on the panel itself: `cd admin && npm run dev` (opens on http://localhost:5173/panel/ and uses the server on port 4000).
+
+**Time in the app** is measured on the phone while the app is in the foreground (and per open chapter), saved in an encrypted queue, and uploaded every 2 minutes, so time spent offline arrives later. Day boundaries use `ADMIN_TZ` (default `Asia/Kolkata`).
+
 ## Files
 
 ```
@@ -164,7 +191,13 @@ server/
   src/middleware/auth.js    token + single-session check
   src/routes/auth.js        login, me, logout (+ optional signup)
   src/routes/books.js       library, contents, section, screenshot report
-  src/routes/admin.js       users, access, sessions, screenshot log
+  src/routes/admin/         admin panel API: stats, users, content, queries, activity, notifications
+  src/routes/activity.js    app usage uploads
+  src/routes/queries.js     student help & feedback
+  src/routes/notifications.js  student inbox
+  src/models/Activity.js    activity log
+  src/models/Query.js       help conversations
+  src/models/Notification.js   notifications + who read them
   src/routes/progress.js    test-paper answers & scores, profile
   src/lib/testKey.js        grades test papers from their own answer key
   src/models/TestAttempt.js saved answers (in progress) and submitted results
@@ -179,7 +212,9 @@ app/
   src/device.js             per-install device id
   src/security.js           capture blocking + screenshot reporting
   src/components/           Watermark, PrivacyCover
-  src/screens/              Login, Library, Book, Reader
+  src/screens/              Login, Library, Book, Reader, Profile, Notifications, Help, Query
+  src/activity.js           time-in-app and reading-time tracking
+admin/                      admin website (React + Vite), served by the server at /panel/
 ```
 
 

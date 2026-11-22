@@ -20,14 +20,26 @@ async function requireAuth(req, res, next) {
   if (!user || user.disabled) {
     return res.status(401).json({ code: 'ACCOUNT_DISABLED', message: 'This account is not active.' });
   }
-  if (!user.activeSession || user.activeSession.id !== payload.sid) {
+  // Admin panel tokens carry web: true and use the admin's separate browser session.
+  const session = payload.web ? user.role === 'admin' && user.webSession : user.activeSession;
+  if (!session || session.id !== payload.sid) {
     return res.status(401).json({
       code: 'SESSION_REPLACED',
-      message: 'You were logged out because this account was signed in on another device.',
+      message: payload.web
+        ? 'You were signed out of the admin panel because it was opened in another browser.'
+        : 'You were logged out because this account was signed in on another device.',
     });
   }
 
+  // "Last seen", written at most once a minute per user.
+  const now = Date.now();
+  if (!payload.web && (!user.lastSeenAt || now - user.lastSeenAt.getTime() > 60 * 1000)) {
+    user.lastSeenAt = new Date(now);
+    User.updateOne({ _id: user._id }, { $set: { lastSeenAt: user.lastSeenAt } }).catch(() => {});
+  }
+
   req.user = user;
+  req.isWeb = Boolean(payload.web);
   next();
 }
 
