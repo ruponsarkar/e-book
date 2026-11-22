@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+<defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#28507f"/><stop offset="1" stop-color="#1a3150"/></linearGradient></defs>
+<rect width="1024" height="1024" fill="url(#g)"/>
+<g transform="translate(512,512) scale(1.12) translate(-512,-582)"><g id="book">
+  <!-- bookmark ribbon (behind the book, hanging below) -->
+  <path d="M664 600 L724 600 L724 820 L694 790 L664 820 Z" fill="#e05a47"/>
+  <!-- cover under the pages -->
+  <path d="M512 742 C420 690 290 686 176 712 L176 396 L512 420 L848 396 L848 712 C734 686 604 690 512 742 Z" fill="#e8a33d"/>
+  <!-- left page -->
+  <path d="M512 410 C430 352 300 344 196 372 L196 684 C300 658 430 664 512 718 Z" fill="#fbf5e7"/>
+  <!-- right page -->
+  <path d="M512 410 C594 352 724 344 828 372 L828 684 C724 658 594 664 512 718 Z" fill="#f3e6c8"/>
+  <!-- lines -->
+  <g stroke="#c9b48a" stroke-width="14" stroke-linecap="round" fill="none">
+    <path d="M250 440 C320 424 390 426 452 446"/>
+    <path d="M250 500 C320 484 390 486 452 506"/>
+    <path d="M250 560 C320 544 390 546 452 566"/>
+    <path d="M250 620 C300 608 340 608 380 616"/>
+    <path d="M572 446 C634 426 704 424 774 440"/>
+    <path d="M572 506 C634 486 704 484 774 500"/>
+    <path d="M572 566 C634 546 704 544 774 560"/>
+    <path d="M644 616 C684 608 724 608 774 620"/>
+  </g>
+  <!-- spine -->
+  <path d="M512 410 L512 718" stroke="#1f3a5f" stroke-opacity="0.18" stroke-width="8"/>
+</g>
+</g>
+</svg>

@@ -217,9 +217,12 @@ app/
 admin/                      admin website (React + Vite), served by the server at /panel/
 ```
 
+npm run apk 
 
 use ebook_db
 db.createUser({user: "ebookuser", pwd: "EbookStrongPassword456", roles: [{role: "readWrite", db: "ebook_db"}]})
 mongosh -u ebookuser -p --authenticationDatabase ebook_db
 password: EbookStrongPassword456
 adb reverse tcp:4000 tcp:4000 
+
+http://72.62.75.203:4000
