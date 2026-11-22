@@ -23,6 +23,9 @@ const userSchema = new mongoose.Schema(
     books: { type: [String], default: [] },
     disabled: { type: Boolean, default: false },
     activeSession: { type: activeSessionSchema, default: null },
+    // Admins also get one browser session for the admin panel, separate from their phone.
+    webSession: { type: activeSessionSchema, default: null },
+    lastSeenAt: { type: Date, default: null },
   },
   { timestamps: true }
 );

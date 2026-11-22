@@ -4,6 +4,7 @@ const { Book, Section } = require('../models/Book');
 const TestAttempt = require('../models/TestAttempt');
 const { requireAuth, canReadBook } = require('../middleware/auth');
 const { grade, cleanAnswers } = require('../lib/testKey');
+const { logActivity } = require('../models/Activity');
 
 const router = express.Router();
 router.use(requireAuth);
@@ -92,6 +93,11 @@ router.post('/tests/:slug/:key/submit', async (req, res) => {
     submittedAt: new Date(),
   });
   await TestAttempt.deleteOne({ ...base(req), status: 'in_progress' });
+  logActivity(req.user._id, 'test_submit', {
+    bookSlug: req.params.slug,
+    sectionKey: req.params.key,
+    detail: `${result.correct}/${result.total} correct · ${result.percent}%`,
+  });
   res.status(201).json({ attempt: summary(attempt) });
 });
 

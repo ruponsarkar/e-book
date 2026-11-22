@@ -11,6 +11,7 @@ import {
   View,
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
+import { Ionicons } from '@expo/vector-icons';
 import { api } from '../api';
 import { syncAll } from '../cache/sync';
 import { vault } from '../cache/vault';
@@ -44,7 +45,7 @@ function scoreColor(p) {
 }
 
 export default function ProfileScreen({ navigation }) {
-  const { logout, updateUser } = useAuth();
+  const { logout, updateUser, unread } = useAuth();
   const [data, setData] = useState(null);
   const [error, setError] = useState('');
   const [refreshing, setRefreshing] = useState(false);
@@ -162,6 +163,23 @@ export default function ProfileScreen({ navigation }) {
             </View>
           </Pressable>
         ))}
+      </View>
+
+      <SectionTitle>Help</SectionTitle>
+      <View style={styles.card}>
+        <LinkRow
+          icon="notifications-outline"
+          label="Notifications"
+          right={unread ? <View style={styles.countPill}><Text style={styles.countText}>{unread}</Text></View> : null}
+          onPress={() => navigation.navigate('Notifications')}
+        />
+        <LinkRow
+          icon="chatbubbles-outline"
+          label="Help & feedback"
+          sub="Report a problem or a mistake, ask a question"
+          onPress={() => navigation.navigate('Help')}
+          divider
+        />
       </View>
 
       <SectionTitle>Account</SectionTitle>
@@ -399,6 +417,20 @@ function ChangePassword() {
   );
 }
 
+function LinkRow({ icon, label, sub, right, onPress, divider }) {
+  return (
+    <Pressable onPress={onPress} style={({ pressed }) => [styles.linkRow, divider && styles.divider, pressed && styles.pressed]}>
+      <Ionicons name={icon} size={20} color={NAVY} style={{ marginRight: 12 }} />
+      <View style={{ flex: 1 }}>
+        <Text style={styles.linkLabel}>{label}</Text>
+        {sub ? <Text style={styles.small}>{sub}</Text> : null}
+      </View>
+      {right}
+      <Text style={styles.chev}>›</Text>
+    </Pressable>
+  );
+}
+
 function Stat({ label, value, sub }) {
   return (
     <View style={styles.stat}>
@@ -486,6 +518,10 @@ const styles = StyleSheet.create({
   scorePill: { borderWidth: 1, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 3, marginLeft: 10 },
   scoreText: { fontWeight: '800', fontSize: 13 },
 
+  linkRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 14 },
+  linkLabel: { color: INK, fontSize: 15, fontWeight: '600' },
+  countPill: { backgroundColor: '#c0392b', borderRadius: 999, minWidth: 22, paddingHorizontal: 7, height: 22, alignItems: 'center', justifyContent: 'center' },
+  countText: { color: '#fff', fontWeight: '800', fontSize: 12 },
   infoRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 14 },
   infoLabel: { color: MUTED, fontSize: 14 },
   infoValue: { color: INK, fontSize: 14, flexShrink: 1, marginLeft: 12 },

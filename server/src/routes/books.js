@@ -1,6 +1,7 @@
 const express = require('express');
 const { Book, Section, ScreenshotEvent } = require('../models/Book');
 const { requireAuth, canReadBook } = require('../middleware/auth');
+const { logActivity } = require('../models/Activity');
 
 const router = express.Router();
 
@@ -51,6 +52,7 @@ router.post('/:slug/screenshot-events', async (req, res) => {
     sectionKey: req.body?.sectionKey,
     platform: req.body?.platform,
   });
+  logActivity(req.user._id, 'screenshot', { bookSlug: req.params.slug, sectionKey: req.body?.sectionKey || '' });
   res.json({ ok: true });
 });
 

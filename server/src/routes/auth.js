@@ -6,6 +6,8 @@ const rateLimit = require('express-rate-limit');
 const config = require('../config');
 const User = require('../models/User');
 const { requireAuth } = require('../middleware/auth');
+const { logActivity } = require('../models/Activity');
+const { unreadCount } = require('../models/Notification');
 
 const router = express.Router();
 
@@ -37,7 +39,25 @@ router.post('/login', loginLimiter, async (req, res) => {
   const replacedOtherDevice = Boolean(user.activeSession && user.activeSession.deviceId !== deviceId);
   const token = startSession(user, { deviceId, deviceName, platform });
   await user.save();
+  logActivity(user._id, 'login', { detail: [deviceName, platform].filter(Boolean).join(' · ') });
   res.json({ token, user: publicUser(user), replacedOtherDevice });
+});
+
+// Admin panel login (browser). Uses its own session, so it doesn't sign the admin's phone out.
+router.post('/admin-login', loginLimiter, async (req, res) => {
+  const { email, password } = req.body || {};
+  if (!email || !password) return res.status(400).json({ code: 'BAD_REQUEST', message: 'Email and password are required.' });
+  const user = await User.findOne({ email: String(email).toLowerCase().trim() });
+  const ok = user && (await bcrypt.compare(String(password), user.passwordHash));
+  if (!ok) return res.status(401).json({ code: 'BAD_CREDENTIALS', message: 'Wrong email or password.' });
+  if (user.role !== 'admin' || user.disabled) {
+    return res.status(403).json({ code: 'FORBIDDEN', message: 'This account cannot use the admin panel.' });
+  }
+  const sid = crypto.randomUUID();
+  user.webSession = { id: sid, deviceId: 'admin-web', deviceName: String(req.get('user-agent') || '').slice(0, 120), platform: 'web' };
+  await user.save();
+  const token = jwt.sign({ sub: String(user._id), sid, web: true }, config.jwtSecret, { expiresIn: '7d' });
+  res.json({ token, user: { id: user._id, name: user.name, email: user.email, role: user.role } });
 });
 
 router.post('/signup', loginLimiter, async (req, res) => {
@@ -56,11 +76,19 @@ router.post('/signup', loginLimiter, async (req, res) => {
 
 // The app calls this on start, on returning to the foreground and every minute,
 // so a phone that was replaced is signed out quickly.
-router.get('/me', requireAuth, (req, res) => {
-  res.json({ user: publicUser(req.user) });
+// Also returns the unread notification count, so the app's badge stays current.
+router.get('/me', requireAuth, async (req, res) => {
+  const unread = req.isWeb ? 0 : await unreadCount(req.user);
+  res.json({ user: publicUser(req.user), unread });
 });
 
 router.post('/logout', requireAuth, async (req, res) => {
+  if (req.isWeb) {
+    req.user.webSession = null;
+    await req.user.save();
+    return res.json({ ok: true });
+  }
+  logActivity(req.user._id, 'logout');
   req.user.activeSession = null;
   await req.user.save();
   res.json({ ok: true });

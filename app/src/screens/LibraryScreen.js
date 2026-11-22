@@ -1,5 +1,6 @@
 import React, { useCallback, useLayoutEffect, useState } from 'react';
 import { ActivityIndicator, FlatList, Pressable, RefreshControl, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { useCached } from '../cache/useCached';
 import OfflineBanner from '../components/OfflineBanner';
 import { useAuth } from '../auth/AuthContext';
@@ -15,7 +16,7 @@ function initials(user) {
 }
 
 export default function LibraryScreen({ navigation }) {
-  const { user } = useAuth();
+  const { user, unread } = useAuth();
   const { width } = useWindowDimensions();
   const { data, error, offline, loading, reload } = useCached('/books');
   const books = data?.books || [];
@@ -27,12 +28,22 @@ export default function LibraryScreen({ navigation }) {
   useLayoutEffect(() => {
     navigation.setOptions({
       headerRight: () => (
-        <Pressable onPress={() => navigation.navigate('Profile')} hitSlop={10} style={styles.avatar}>
-          <Text style={styles.avatarText}>{initials(user)}</Text>
-        </Pressable>
+        <View style={styles.headerRight}>
+          <Pressable onPress={() => navigation.navigate('Notifications')} hitSlop={10} style={styles.bell} accessibilityLabel="Notifications">
+            <Ionicons name={unread ? 'notifications' : 'notifications-outline'} size={23} color="#1f3a5f" />
+            {unread ? (
+              <View style={styles.badge}>
+                <Text style={styles.badgeText}>{unread > 9 ? '9+' : unread}</Text>
+              </View>
+            ) : null}
+          </Pressable>
+          <Pressable onPress={() => navigation.navigate('Profile')} hitSlop={10} style={styles.avatar}>
+            <Text style={styles.avatarText}>{initials(user)}</Text>
+          </Pressable>
+        </View>
       ),
     });
-  }, [navigation, user]);
+  }, [navigation, user, unread]);
 
   const refresh = useCallback(async () => {
     setRefreshing(true);
@@ -80,6 +91,23 @@ export default function LibraryScreen({ navigation }) {
 }
 
 const styles = StyleSheet.create({
+  headerRight: { flexDirection: 'row', alignItems: 'center', gap: 16 },
+  bell: { padding: 2 },
+  badge: {
+    position: 'absolute',
+    top: -4,
+    right: -6,
+    minWidth: 18,
+    height: 18,
+    borderRadius: 9,
+    paddingHorizontal: 4,
+    backgroundColor: '#c0392b',
+    borderWidth: 2,
+    borderColor: '#fff',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  badgeText: { color: '#fff', fontSize: 10, fontWeight: '800' },
   avatar: {
     width: 34,
     height: 34,
