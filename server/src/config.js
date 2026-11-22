@@ -18,5 +18,12 @@ module.exports = {
   // After that the student must go online once so the account is re-checked.
   // Time zone the admin panel uses for "today" and daily charts.
   adminTz: process.env.ADMIN_TZ || 'Asia/Kolkata',
+  // Website and Razorpay settings: edited in the admin panel (Settings), .env values are the defaults.
+  get site() {
+    return require('./lib/settings').site();
+  },
+  get razorpay() {
+    return require('./lib/settings').razorpay();
+  },
   offlineDays: Math.max(0, Number(process.env.OFFLINE_DAYS ?? 7)),
 };

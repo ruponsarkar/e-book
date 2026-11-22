@@ -3,6 +3,7 @@ import { ActivityIndicator, View } from 'react-native';
 import { createNavigationContainerRef, NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { StatusBar } from 'expo-status-bar';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { AuthProvider, useAuth } from './src/auth/AuthContext';
 import { useScreenProtection } from './src/security';
 import PrivacyCover from './src/components/PrivacyCover';
@@ -19,7 +20,10 @@ import { useSessionTracking } from './src/activity';
 
 const Stack = createNativeStackNavigator();
 const navigationRef = createNavigationContainerRef();
-const PAPER_HEADER = { headerStyle: { backgroundColor: '#f6f1e7' }, headerShadowVisible: false };
+const PAPER_HEADER = {
+  headerStyle: { backgroundColor: '#f6f1e7' },
+  headerShadowVisible: false,
+};
 
 function Root() {
   const { user, loading } = useAuth();
@@ -44,15 +48,19 @@ function Root() {
           <Stack.Screen
             name="Book"
             component={BookScreen}
-            options={{ title: '', headerStyle: { backgroundColor: '#f6f1e7' }, headerShadowVisible: false }}
+            options={{
+              title: '',
+              headerStyle: { backgroundColor: '#f6f1e7' },
+              headerShadowVisible: false,
+            }}
           />
           <Stack.Screen name="Reader" component={ReaderScreen} options={({ route }) => ({ title: route.params.title })} />
+          <Stack.Screen name="Profile" component={ProfileScreen} options={{ title: 'Profile', ...PAPER_HEADER }} />
           <Stack.Screen
-            name="Profile"
-            component={ProfileScreen}
-            options={{ title: 'Profile', ...PAPER_HEADER }}
+            name="Notifications"
+            component={NotificationsScreen}
+            options={{ title: 'Notifications', ...PAPER_HEADER }}
           />
-          <Stack.Screen name="Notifications" component={NotificationsScreen} options={{ title: 'Notifications', ...PAPER_HEADER }} />
           <Stack.Screen name="Help" component={HelpScreen} options={{ title: 'Help & feedback', ...PAPER_HEADER }} />
           <Stack.Screen name="Query" component={QueryScreen} options={{ title: 'Conversation', ...PAPER_HEADER }} />
         </>
@@ -70,21 +78,25 @@ function SignedInOnly({ children }) {
 
 export default function App() {
   return (
-    <AuthProvider>
-      <NavigationContainer ref={navigationRef}>
-        <StatusBar style="dark" />
-        <Root />
-        <SignedInOnly>
-          <NotificationBanner
-            onOpen={(n) =>
-              navigationRef.isReady() &&
-              (n.kind === 'reply' && n.queryId ? navigationRef.navigate('Query', { id: n.queryId }) : navigationRef.navigate('Notifications'))
-            }
-          />
-        </SignedInOnly>
-      </NavigationContainer>
-      {/* Hides the page in the app switcher so content can't be read from the recent-apps view. */}
-      <PrivacyCover />
-    </AuthProvider>
+    <SafeAreaProvider>
+      <AuthProvider>
+        <NavigationContainer ref={navigationRef}>
+          <StatusBar style="dark" />
+          <Root />
+          <SignedInOnly>
+            <NotificationBanner
+              onOpen={(n) =>
+                navigationRef.isReady() &&
+                (n.kind === 'reply' && n.queryId
+                  ? navigationRef.navigate('Query', { id: n.queryId })
+                  : navigationRef.navigate('Notifications'))
+              }
+            />
+          </SignedInOnly>
+        </NavigationContainer>
+        {/* Hides the page in the app switcher so content can't be read from the recent-apps view. */}
+        <PrivacyCover />
+      </AuthProvider>
+    </SafeAreaProvider>
   );
 }

@@ -11,6 +11,8 @@ import SectionEditor from './pages/SectionEditor';
 import Queries from './pages/Queries';
 import Activity from './pages/Activity';
 import Notifications from './pages/Notifications';
+import Registrations from './pages/Registrations';
+import Settings from './pages/Settings';
 
 // Hash routes: #/students/abc → ['students', 'abc']
 function useRoute() {
@@ -29,22 +31,28 @@ function useRoute() {
 
 const NAV = [
   ['', 'Dashboard', '◧'],
+  ['registrations', 'Registrations', '₹'],
   ['students', 'Students', '◎'],
   ['books', 'Books & questions', '▤'],
   ['queries', 'Queries', '✉'],
   ['activity', 'Activity', '◷'],
   ['notifications', 'Notifications', '◔'],
+  ['settings', 'Settings', '⚙'],
 ];
 
 function Shell({ me, onLogout }) {
   const route = useRoute();
   const [open, setOpen] = useState(false);
   const [openQueries, setOpenQueries] = useState(0);
+  const [todo, setTodo] = useState(0);
   const [section, id, sub, key] = route;
 
   useEffect(() => {
     api('/admin/queries?status=open')
       .then((d) => setOpenQueries(d.counts.open || 0))
+      .catch(() => {});
+    api('/admin/registrations?status=todo')
+      .then((d) => setTodo(d.summary.todo || 0))
       .catch(() => {});
   }, [section]);
 
@@ -57,6 +65,12 @@ function Shell({ me, onLogout }) {
       if (id && sub === 'sections' && key) page = <SectionEditor slug={id} sectionKey={key} />;
       else if (id && sub === 'new') page = <SectionEditor slug={id} />;
       else page = id ? <Book slug={id} /> : <Books />;
+      break;
+    case 'registrations':
+      page = <Registrations />;
+      break;
+    case 'settings':
+      page = <Settings />;
       break;
     case 'queries':
       page = <Queries selected={id} />;
@@ -94,6 +108,7 @@ function Shell({ me, onLogout }) {
               </span>
               {label}
               {path === 'queries' && openQueries ? <span className="nav-count">{openQueries}</span> : null}
+              {path === 'registrations' && todo ? <span className="nav-count">{todo}</span> : null}
             </a>
           ))}
         </nav>

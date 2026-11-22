@@ -17,6 +17,12 @@ export default function Dashboard() {
         <Stat label="Time in app today" value={minutes(data.minutesToday)} sub={`${data.testsToday} test${data.testsToday === 1 ? '' : 's'} submitted`} />
         <Stat label="Open queries" value={data.openQueries} sub={data.openQueries ? 'waiting for a reply' : 'all answered'} onClick={() => go('queries')} />
       </div>
+      <div className="stats">
+        <Stat label="Logins to send" value={data.registrations.todo} sub={data.registrations.todo ? 'paid, waiting for account' : 'all sent'} onClick={() => go('registrations')} />
+        <Stat label="Paid today" value={data.registrations.paidToday} onClick={() => go('registrations')} />
+        <Stat label="Paid registrations" value={data.registrations.paid} />
+        <Stat label="Revenue" value={`₹${data.registrations.revenue.toLocaleString('en-IN')}`} sub="before Razorpay fees" />
+      </div>
 
       <div className="grid2">
         <section className="card">

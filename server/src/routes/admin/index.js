@@ -8,6 +8,13 @@ router.use((req, res, next) => {
   next();
 });
 
+// Book edits change the numbers shown on the website.
+const { clearCatalog } = require('../../lib/catalog');
+router.use((req, res, next) => {
+  if (req.method !== 'GET' && req.path.startsWith('/books')) clearCatalog();
+  next();
+});
+
 // Lets route handlers be async without try/catch in each (errors go to the app's error handler).
 const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 for (const m of ['get', 'post', 'put', 'patch', 'delete']) {
@@ -21,5 +28,7 @@ require('./content')(router);
 require('./queries')(router);
 require('./activity')(router);
 require('./notifications')(router);
+require('./registrations')(router);
+require('./settings')(router);
 
 module.exports = router;

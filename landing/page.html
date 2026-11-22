@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>{{PAGE_TITLE}} · {{SITE_NAME}}</title>
+  <meta name="theme-color" content="#1f3a5f" />
+  <link rel="icon" href="/site/favicon.svg" type="image/svg+xml" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,700&family=Inter:wght@400;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/site/styles.css?v={{VERSION}}" />
+  <style>
+    .doc { max-width: 760px; margin: 0 auto; padding: 56px 20px 80px; }
+    .doc h1 { font-size: clamp(30px, 5vw, 42px); color: var(--navy-d); }
+    .doc h2 { font-size: 21px; margin: 32px 0 8px; }
+    .doc p, .doc li { color: #4a4030; }
+    .doc .updated { color: var(--muted); font-size: 14px; margin: 8px 0 28px; }
+    .doc .box { background: var(--paper); border-radius: 14px; padding: 18px 20px; }
+  </style>
+</head>
+<body>
+  <header class="nav">
+    <div class="wrap nav-in">
+      <a href="/" class="logo"><span class="logo-mark">EB</span><span class="logo-name">{{SITE_NAME}}</span></a>
+      <a href="/#register" class="btn btn-gold btn-sm" style="margin-left:auto">Register · ₹{{PRICE}}</a>
+    </div>
+  </header>
+  <main class="doc">
+    <h1>{{PAGE_TITLE}}</h1>
+    <p class="updated">Last updated: {{UPDATED}}</p>
+    {{PAGE_BODY}}
+  </main>
+  <footer class="foot" style="padding-bottom:48px">
+    <div class="wrap foot-in">
+      <div><a href="/" class="logo"><span class="logo-mark">EB</span><span class="logo-name">{{SITE_NAME}}</span></a><p class="muted">{{BUSINESS_NAME}}<br />{{BUSINESS_ADDRESS}}</p></div>
+      <div class="foot-links"><a href="/terms">Terms &amp; Conditions</a><a href="/privacy">Privacy Policy</a><a href="/refund">Refund &amp; Cancellation</a><a href="/delivery">Delivery Policy</a><a href="/contact">Contact us</a></div>
+      <div class="muted small"><a href="mailto:{{CONTACT_EMAIL}}">{{CONTACT_EMAIL}}</a><br />WhatsApp {{CONTACT_PHONE}}<br />© {{YEAR}} {{SITE_NAME}}</div>
+    </div>
+  </footer>
+</body>
+</html>
