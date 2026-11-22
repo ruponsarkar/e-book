@@ -194,7 +194,14 @@ The server also hosts the public website at `/`: the landing page, the registrat
 4. Without keys, the form shows "Online payment opens soon" with your WhatsApp number.
 5. Read the policy pages (`landing/pages/*.html`) and adjust them to your business before switching to live keys.
 
-Secrets are stored encrypted with a key derived from `JWT_SECRET`. If you ever change `JWT_SECRET`, enter the Razorpay secrets again.
+**Email (Settings → Email):** turn on **Send emails**, enter the addresses that should get "new registration" alerts, and fill in your SMTP server. The **Quick fill** buttons cover Gmail, Zoho, Hostinger, Outlook and Brevo; for Gmail, use an App Password. **Send test email** checks the settings before you save. When a payment is confirmed:
+
+- the student gets a receipt ("payment received, login within X hours"), and
+- every alert address gets the student's details and a link to Registrations.
+
+Each is sent once, even when Razorpay's webhook and the browser both report the payment. In Registrations, **Send by email** sends the login details (with the Play Store link) from the server, and each registration shows which emails went out, or why one failed.
+
+Secrets (Razorpay secrets, SMTP password) are stored encrypted with a key derived from `JWT_SECRET`. If you ever change `JWT_SECRET`, enter them again.
 
 **Domain (exambook.frontwebtech.com):** add a DNS **A record** for `exambook` pointing to your server's IP, then put Nginx in front of the Node server with a free Let's Encrypt certificate:
 

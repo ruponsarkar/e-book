@@ -30,13 +30,25 @@ const SECTIONS = [
   },
 ];
 
+// Common SMTP servers, to fill the form in one click.
+const PRESETS = [
+  ['Gmail', 'smtp.gmail.com', 465, true, 'Use an App Password (Google Account → Security → App passwords), not your normal password.'],
+  ['Zoho', 'smtp.zoho.in', 465, true, 'Use smtp.zoho.com if your account is not on the India data centre.'],
+  ['Hostinger', 'smtp.hostinger.com', 465, true, 'Use the email account and password from Hostinger → Emails.'],
+  ['Outlook / Microsoft 365', 'smtp.office365.com', 587, false, 'SMTP sending must be allowed for the mailbox.'],
+  ['Brevo', 'smtp-relay.brevo.com', 587, false, 'Use the SMTP login and key from Brevo → SMTP & API.'],
+];
+
 const SOURCE = { panel: null, env: <Badge>from .env</Badge>, unset: <Badge kind="red">not set</Badge> };
 
 export default function Settings() {
   const { data, error, reload, setData } = useLoad('/admin/settings');
   const [form, setForm] = useState(null);
-  const [secrets, setSecrets] = useState({ razorpayKeySecret: '', razorpayWebhookSecret: '' });
+  const [secrets, setSecrets] = useState({ razorpayKeySecret: '', razorpayWebhookSecret: '', smtpPass: '' });
   const [test, setTest] = useState(null);
+  const [mailTest, setMailTest] = useState(null);
+  const [testTo, setTestTo] = useState('');
+  const [presetHint, setPresetHint] = useState('');
   const [run, busy] = useAction();
   const toast = useToast();
 
@@ -48,19 +60,19 @@ export default function Settings() {
 
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
   const changed = Object.keys(form).filter((k) => !k.endsWith('Secret') && String(form[k] ?? '') !== String(data.values[k] ?? ''));
-  const dirty = changed.length > 0 || secrets.razorpayKeySecret || secrets.razorpayWebhookSecret;
+  const dirty = changed.length > 0 || Object.values(secrets).some(Boolean);
+  const check = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.checked }));
   const webhookUrl = `${(form.url || window.location.origin).replace(/\/+$/, '')}${data.webhookPath}`;
 
   const save = async (e) => {
     e?.preventDefault();
     const body = {};
     for (const k of changed) body[k] = form[k];
-    if (secrets.razorpayKeySecret) body.razorpayKeySecret = secrets.razorpayKeySecret;
-    if (secrets.razorpayWebhookSecret) body.razorpayWebhookSecret = secrets.razorpayWebhookSecret;
+    for (const [k, v] of Object.entries(secrets)) if (v) body[k] = v;
     const r = await run(() => api('/admin/settings', { method: 'PUT', body }), 'Settings saved. The website uses them right away.');
     if (r) {
       setData(r);
-      setSecrets({ razorpayKeySecret: '', razorpayWebhookSecret: '' });
+      setSecrets({ razorpayKeySecret: '', razorpayWebhookSecret: '', smtpPass: '' });
     }
   };
 
@@ -79,6 +91,31 @@ export default function Settings() {
       })
     );
     if (r) setTest(r);
+  };
+
+  const sendTest = async () => {
+    setMailTest(null);
+    const r = await run(() =>
+      api('/admin/settings/test-email', {
+        method: 'POST',
+        body: {
+          to: testTo,
+          smtpHost: form.smtpHost,
+          smtpPort: form.smtpPort,
+          smtpSecure: form.smtpSecure,
+          smtpUser: form.smtpUser,
+          smtpPass: secrets.smtpPass,
+          mailFromName: form.mailFromName,
+          mailFromEmail: form.mailFromEmail,
+        },
+      })
+    );
+    if (r) setMailTest(r);
+  };
+
+  const applyPreset = ([, host, port, secure, hint]) => {
+    setForm((f) => ({ ...f, smtpHost: host, smtpPort: port, smtpSecure: secure }));
+    setPresetHint(hint);
   };
 
   const label = (k, text) => (
@@ -180,6 +217,72 @@ export default function Settings() {
               />
             </Field>
           </div>
+        </section>
+
+        <section className="card">
+          <div className="row between">
+            <h3>Email</h3>
+            {data.emailReady ? <Badge kind="green">Sending on</Badge> : form.emailEnabled ? <Badge kind="red">Incomplete</Badge> : <Badge>Off</Badge>}
+          </div>
+          <p className="muted small">
+            When a student pays, they get a receipt email and the addresses below get a “new registration” alert. You can also email the login details from
+            Registrations. Works with any SMTP service.
+          </p>
+          <label className="check strong mt">
+            <input type="checkbox" checked={Boolean(form.emailEnabled)} onChange={check('emailEnabled')} />
+            Send emails
+          </label>
+
+          <Field label="Send new-registration alerts to" hint="One or more addresses, separated by commas.">
+            <input value={form.adminEmails ?? ''} onChange={set('adminEmails')} placeholder="you@frontwebtech.com, partner@gmail.com" />
+          </Field>
+
+          <h3 className="mt">SMTP server</h3>
+          <div className="row gap wrap" style={{ marginBottom: 10 }}>
+            <span className="muted small">Quick fill:</span>
+            {PRESETS.map((p) => (
+              <button key={p[0]} type="button" className="btn small" onClick={() => applyPreset(p)}>{p[0]}</button>
+            ))}
+          </div>
+          {presetHint ? <p className="note">{presetHint}</p> : null}
+          <div className="settings-grid mt">
+            <Field label={label('smtpHost', 'SMTP server')}>
+              <input className="mono" value={form.smtpHost ?? ''} onChange={set('smtpHost')} placeholder="smtp.gmail.com" />
+            </Field>
+            <div className="row gap" style={{ alignItems: 'flex-start' }}>
+              <Field label={label('smtpPort', 'Port')}>
+                <input type="number" value={form.smtpPort ?? ''} onChange={set('smtpPort')} style={{ width: 110 }} />
+              </Field>
+              <label className="check" style={{ marginTop: 30 }}>
+                <input type="checkbox" checked={Boolean(form.smtpSecure)} onChange={check('smtpSecure')} />
+                SSL (port 465)
+              </label>
+            </div>
+            <Field label={label('smtpUser', 'Username')} hint="Usually the full email address.">
+              <input value={form.smtpUser ?? ''} onChange={set('smtpUser')} autoComplete="off" />
+            </Field>
+            <Field label={label('smtpPass', 'Password')} hint={data.values.smtpPass ? `Saved: ${data.values.smtpPass}` : 'Not set'}>
+              <input
+                type="password"
+                autoComplete="new-password"
+                value={secrets.smtpPass}
+                onChange={(e) => setSecrets((x) => ({ ...x, smtpPass: e.target.value }))}
+                placeholder={data.values.smtpPass ? 'Enter a new password to replace it' : 'SMTP password or app password'}
+              />
+            </Field>
+            <Field label={label('mailFromName', 'From name')} hint="What students see as the sender.">
+              <input value={form.mailFromName ?? ''} onChange={set('mailFromName')} placeholder={form.name} />
+            </Field>
+            <Field label={label('mailFromEmail', 'From email')} hint="Usually the same as the username.">
+              <input value={form.mailFromEmail ?? ''} onChange={set('mailFromEmail')} placeholder="support@frontwebtech.com" />
+            </Field>
+          </div>
+          <div className="row gap wrap">
+            <input style={{ maxWidth: 280 }} value={testTo} onChange={(e) => setTestTo(e.target.value)} placeholder="Send a test to…" />
+            <button type="button" className="btn" onClick={sendTest} disabled={busy || !testTo}>Send test email</button>
+            {mailTest ? <span className={mailTest.ok ? 'ok-text' : 'err'}>{mailTest.ok ? `✓ ${mailTest.message}` : mailTest.message}</span> : null}
+          </div>
+          <p className="muted small">The test uses what's in the form, even before saving. Save to start sending.</p>
         </section>
 
         <div className="row end">

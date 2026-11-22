@@ -4,6 +4,8 @@ const Registration = require('../../models/Registration');
 const User = require('../../models/User');
 const { Book } = require('../../models/Book');
 const { startOfToday } = require('../../lib/time');
+const mailer = require('../../lib/mailer');
+const { sendPaidEmails, studentLogin } = require('../../lib/emails');
 
 const bad = (res, message, status = 400) => res.status(status).json({ code: 'BAD_REQUEST', message });
 
@@ -26,6 +28,10 @@ function view(r) {
     fulfilledAt: r.fulfilledAt,
     userId: r.userId,
     adminNote: r.adminNote,
+    studentEmailedAt: r.studentEmailedAt,
+    adminEmailedAt: r.adminEmailedAt,
+    loginEmailedAt: r.loginEmailedAt,
+    emailError: r.emailError,
     source: r.source,
     createdAt: r.createdAt,
   };
@@ -54,7 +60,7 @@ module.exports = (router) => {
     res.json({
       registrations: rows.map(view),
       summary: { todo, paid, paidToday, revenue: (revenue[0]?.sum || 0) / 100 },
-      site: { playStoreUrl: config.site.playStoreUrl, name: config.site.name, price: config.site.priceInr },
+      site: { playStoreUrl: config.site.playStoreUrl, name: config.site.name, price: config.site.priceInr, emailReady: mailer.ready() },
     });
   });
 
@@ -68,13 +74,16 @@ module.exports = (router) => {
       r.fulfilled = fulfilled;
       r.fulfilledAt = fulfilled ? new Date() : null;
     }
+    let justPaid = false;
     if (markPaid && r.status !== 'paid') {
       r.status = 'paid';
       r.paidAt = new Date();
       r.paidVia = 'manual';
       r.paymentId = String(markPaid.reference || '').slice(0, 80);
+      justPaid = true;
     }
     await r.save();
+    if (justPaid) sendPaidEmails(r, { admin: false }).catch(() => {}); // the student still gets the receipt
     res.json({ registration: view(r) });
   });
 
@@ -105,6 +114,22 @@ module.exports = (router) => {
     r.userId = user._id;
     await r.save();
     res.json({ registration: view(r), user: { id: user._id, email: user.email, books: user.books } });
+  });
+
+  // Emails the login details (the password is only known right after creating the account).
+  router.post('/registrations/:id/email-login', async (req, res) => {
+    const r = await Registration.findById(req.params.id).catch(() => null);
+    if (!r || !r.userId) return bad(res, 'Create the account first.');
+    const password = String(req.body?.password || '');
+    if (password.length < 8) return bad(res, 'Password missing.');
+    try {
+      await mailer.send(studentLogin(r, { email: r.email, password }));
+    } catch (e) {
+      return bad(res, `Email failed: ${e.message}`);
+    }
+    r.loginEmailedAt = new Date();
+    await r.save();
+    res.json({ registration: view(r) });
   });
 
   router.delete('/registrations/:id', async (req, res) => {

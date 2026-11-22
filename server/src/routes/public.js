@@ -6,6 +6,7 @@ const Registration = require('../models/Registration');
 const User = require('../models/User');
 const razorpay = require('../lib/razorpay');
 const { catalog } = require('../lib/catalog');
+const { sendPaidEmails } = require('../lib/emails');
 
 const router = express.Router();
 // Async handlers: send errors to the app's error handler.
@@ -90,15 +91,16 @@ router.post('/register', limiter, async (req, res) => {
   }
 });
 
+// Atomic, so the browser and the webhook arriving together can't both send the emails.
 async function markPaid(reg, { paymentId, method = '', via }) {
-  if (reg.status === 'paid') return reg;
-  reg.status = 'paid';
-  reg.paymentId = paymentId;
-  reg.method = method;
-  reg.paidAt = new Date();
-  reg.paidVia = via;
-  await reg.save();
-  return reg;
+  const updated = await Registration.findOneAndUpdate(
+    { _id: reg._id, status: { $ne: 'paid' } },
+    { $set: { status: 'paid', paymentId, method, paidAt: new Date(), paidVia: via } },
+    { new: true }
+  );
+  if (!updated) return Registration.findById(reg._id); // already marked paid
+  sendPaidEmails(updated).catch(() => {}); // in the background; doesn't delay the student
+  return updated;
 }
 
 // Step 2: the browser reports the payment; the signature proves it came from Razorpay.

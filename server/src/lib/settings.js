@@ -18,8 +18,17 @@ const DEFAULTS = () => ({
   razorpayKeyId: env.RAZORPAY_KEY_ID || '',
   razorpayKeySecret: env.RAZORPAY_KEY_SECRET || '',
   razorpayWebhookSecret: env.RAZORPAY_WEBHOOK_SECRET || '',
+  emailEnabled: env.EMAIL_ENABLED === 'true',
+  smtpHost: env.SMTP_HOST || '',
+  smtpPort: Number(env.SMTP_PORT) || 587,
+  smtpSecure: env.SMTP_SECURE === 'true', // true for port 465
+  smtpUser: env.SMTP_USER || '',
+  smtpPass: env.SMTP_PASS || '',
+  mailFromName: env.MAIL_FROM_NAME || '',
+  mailFromEmail: env.MAIL_FROM_EMAIL || '',
+  adminEmails: env.ADMIN_EMAILS || '', // comma-separated: who gets "new registration" alerts
 });
-const SECRETS = ['razorpayKeySecret', 'razorpayWebhookSecret'];
+const SECRETS = ['razorpayKeySecret', 'razorpayWebhookSecret', 'smtpPass'];
 const KEY = 'site';
 
 let saved = {}; // decrypted values from the database
@@ -109,4 +118,22 @@ const razorpay = () => {
   return { keyId: s.razorpayKeyId, keySecret: s.razorpayKeySecret, webhookSecret: s.razorpayWebhookSecret };
 };
 
-module.exports = { load, all, sources, save, site, razorpay, DEFAULTS, SECRETS };
+const email = () => {
+  const s = all();
+  return {
+    enabled: Boolean(s.emailEnabled),
+    host: s.smtpHost,
+    port: Number(s.smtpPort) || 587,
+    secure: Boolean(s.smtpSecure),
+    user: s.smtpUser,
+    pass: s.smtpPass,
+    fromName: s.mailFromName || s.name,
+    fromEmail: s.mailFromEmail || s.smtpUser,
+    adminEmails: String(s.adminEmails || '')
+      .split(/[,\s;]+/)
+      .map((x) => x.trim().toLowerCase())
+      .filter((x) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(x)),
+  };
+};
+
+module.exports = { load, all, sources, save, site, razorpay, email, DEFAULTS, SECRETS };

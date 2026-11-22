@@ -200,6 +200,13 @@ function Detail({ reg, site, onClose, onChanged }) {
           <dd className="mono small">{reg.paymentId || <span className="muted">—</span>}</dd>
           <dt>Order ID</dt>
           <dd className="mono small">{reg.orderId || <span className="muted">—</span>}</dd>
+          <dt>Emails</dt>
+          <dd className="small">
+            {reg.studentEmailedAt ? `Receipt sent ${ago(reg.studentEmailedAt)}` : 'No receipt sent'}
+            {reg.adminEmailedAt ? ' · alert sent' : ''}
+            {reg.loginEmailedAt ? ` · login emailed ${ago(reg.loginEmailedAt)}` : ''}
+            {reg.emailError ? <div className="err">{reg.emailError}</div> : null}
+          </dd>
         </dl>
       </div>
 
@@ -227,7 +234,21 @@ function Detail({ reg, site, onClose, onChanged }) {
               <pre className="creds">{message}</pre>
               <div className="row gap wrap">
                 <a className="btn primary" href={wa} target="_blank" rel="noreferrer">Send on WhatsApp</a>
-                <a className="btn" href={mail}>Send by email</a>
+                {site.emailReady ? (
+                  <button
+                    className="btn"
+                    disabled={busy}
+                    onClick={() =>
+                      run(() => api(`/admin/registrations/${reg.id}/email-login`, { method: 'POST', body: { password: created.password } }), `Login emailed to ${reg.email}`).then(
+                        (r) => r && onChanged(r.registration)
+                      )
+                    }
+                  >
+                    {reg.loginEmailedAt ? 'Email again' : 'Send by email'}
+                  </button>
+                ) : (
+                  <a className="btn" href={mail}>Send by email</a>
+                )}
                 <button className="btn" onClick={() => navigator.clipboard?.writeText(message)}>Copy</button>
               </div>
               <div className="row between mt">
