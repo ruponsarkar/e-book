@@ -5,6 +5,7 @@ const { Activity } = require('../../models/Activity');
 const config = require('../../config');
 const { startOfToday, daysAgo } = require('../../lib/time');
 const { describeEvents } = require('./activity');
+const Registration = require('../../models/Registration');
 
 module.exports = (router) => {
   // Dashboard numbers.
@@ -14,6 +15,11 @@ module.exports = (router) => {
     const from = daysAgo(13);
     const students = { role: 'student' };
 
+    const [regTodo, regToday, revenue] = await Promise.all([
+      Registration.countDocuments({ status: 'paid', fulfilled: false }),
+      Registration.countDocuments({ status: 'paid', paidAt: { $gte: today } }),
+      Registration.aggregate([{ $match: { status: 'paid' } }, { $group: { _id: null, sum: { $sum: '$amount' }, n: { $sum: 1 } } }]),
+    ]);
     const [total, disabled, activeToday, activeWeek, openQueries, testsToday, timeToday, daily, recent] = await Promise.all([
       User.countDocuments(students),
       User.countDocuments({ ...students, disabled: true }),
@@ -48,6 +54,7 @@ module.exports = (router) => {
       daily: fillDays(daily, 14),
       recent: await describeEvents(recent),
       timeZone: config.adminTz,
+      registrations: { todo: regTodo, paidToday: regToday, paid: revenue[0]?.n || 0, revenue: (revenue[0]?.sum || 0) / 100 },
     });
   });
 };

@@ -15,6 +15,11 @@ app.use(
   })
 );
 app.use(cors()); // the mobile app does not send an Origin; tighten this if you add a web admin panel
+// Razorpay webhooks are signed over the exact bytes, so this one route reads the raw body.
+const publicRoutes = require('./routes/public');
+app.post('/public/razorpay-webhook', express.raw({ type: '*/*', limit: '1mb' }), (req, res, next) =>
+  publicRoutes.webhook(req, res).catch(next)
+);
 app.use(express.json({ limit: '1mb' }));
 
 // Health check: is the API up and can it reach MongoDB? Safe to call without logging in.
@@ -22,7 +27,7 @@ const { version } = require('../package.json');
 const started = Date.now();
 const DB_STATES = ['disconnected', 'connected', 'connecting', 'disconnecting'];
 
-app.get('/', (req, res) => res.json({ name: 'E-book API', version, health: '/health', adminPanel: '/panel/' }));
+app.get('/api', (req, res) => res.json({ name: 'E-book API', version, health: '/health', adminPanel: '/panel/' }));
 
 app.get('/health', async (req, res) => {
   const t0 = Date.now();
@@ -51,6 +56,10 @@ app.use('/progress', require('./routes/progress'));
 app.use('/activity', require('./routes/activity'));
 app.use('/queries', require('./routes/queries'));
 app.use('/notifications', require('./routes/notifications'));
+app.use('/public', publicRoutes.router);
+
+// Public website (landing page, policy pages) at /.
+app.use(require('./landing').landing());
 
 // Admin panel (built from ../admin with `npm run build` there), at /panel.
 const panel = path.join(__dirname, '../../admin/dist');
@@ -67,7 +76,8 @@ app.use((err, req, res, next) => {
 
 mongoose
   .connect(config.mongoUri)
-  .then(() => {
+  .then(async () => {
+    await require('./lib/settings').load();
     app.listen(config.port, () => console.log(`E-book API listening on port ${config.port}`));
   })
   .catch((err) => {

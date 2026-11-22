@@ -180,6 +180,39 @@ To work on the panel itself: `cd admin && npm run dev` (opens on http://localhos
 
 **Time in the app** is measured on the phone while the app is in the foreground (and per open chapter), saved in an encrypted queue, and uploaded every 2 minutes, so time spent offline arrives later. Day boundaries use `ADMIN_TZ` (default `Asia/Kolkata`).
 
+## 6. Website, registration and payments
+
+The server also hosts the public website at `/`: the landing page, the registration form with **Razorpay** payment, and the policy pages Razorpay asks for (`/terms`, `/privacy`, `/refund`, `/delivery`, `/contact`). Numbers on the page (questions, chapters, tests, questions per exam) come live from the published books.
+
+**Flow:** the student fills the form, then pays ₹`PRICE_INR` in Razorpay Checkout. The payment is verified on the server and shows up in the admin panel under **Registrations → Send login**. There you create the account (random password, all books ticked) and send the login with one click on WhatsApp or email, which includes the Play Store link. Then mark it sent.
+
+**Set up:** everything is in the admin panel under **Settings**, and changes apply immediately with no restart. Values in `server/.env` (see `.env.example`) are only the defaults; a value marked "from .env" hasn't been changed in the panel.
+
+1. **Website, price & contact:** site name, website address, price, login delivery hours, Play Store link, support email, WhatsApp number, business name and address. The policy pages and footer use these, and Razorpay checks them.
+2. **Razorpay keys:** Razorpay dashboard → API Keys. Paste the Key ID and Key Secret, click **Test keys**, then save. Start with **test mode** keys (`rzp_test_…`); the page shows which mode is active.
+3. **Webhook:** copy the webhook URL shown on the Settings page into Razorpay → Webhooks, with the events `payment.captured`, `order.paid` and `payment.failed` and a secret of your choice, and enter the same secret in Settings.
+4. Without keys, the form shows "Online payment opens soon" with your WhatsApp number.
+5. Read the policy pages (`landing/pages/*.html`) and adjust them to your business before switching to live keys.
+
+Secrets are stored encrypted with a key derived from `JWT_SECRET`. If you ever change `JWT_SECRET`, enter the Razorpay secrets again.
+
+**Domain (exambook.frontwebtech.com):** add a DNS **A record** for `exambook` pointing to your server's IP, then put Nginx in front of the Node server with a free Let's Encrypt certificate:
+
+```nginx
+server {
+  server_name exambook.frontwebtech.com;
+  location / { proxy_pass http://127.0.0.1:4000; proxy_set_header Host $host; proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for; proxy_set_header X-Forwarded-Proto $scheme; }
+}
+```
+
+```bash
+sudo certbot --nginx -d exambook.frontwebtech.com
+```
+
+After that, set the app's `apiUrl` to `https://exambook.frontwebtech.com`, remove `usesCleartextTraffic` from `app.json`, and rebuild the APK. The admin panel is at `https://exambook.frontwebtech.com/panel/`.
+
+To edit the website, change `landing/index.html`, `landing/site/styles.css`, `landing/site/app.js` and `landing/pages/*.html`, then restart the server.
+
 ## Files
 
 ```
@@ -215,6 +248,7 @@ app/
   src/screens/              Login, Library, Book, Reader, Profile, Notifications, Help, Query
   src/activity.js           time-in-app and reading-time tracking
 admin/                      admin website (React + Vite), served by the server at /panel/
+landing/                    public website: landing page, policy pages (served at /)
 ```
 
 npm run apk 
