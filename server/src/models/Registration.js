@@ -24,6 +24,11 @@ const registrationSchema = new mongoose.Schema(
     userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
     adminNote: { type: String, default: '' },
 
+    studentEmailedAt: { type: Date, default: null }, // payment confirmation sent to the student
+    adminEmailedAt: { type: Date, default: null }, // "new registration" alert sent to the admin(s)
+    loginEmailedAt: { type: Date, default: null }, // login details emailed from the admin panel
+    emailError: { type: String, default: '' },
+
     ip: { type: String, default: '' },
     userAgent: { type: String, default: '' },
     source: { type: String, default: '' }, // utm_source or referrer, if any

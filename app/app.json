@@ -19,7 +19,7 @@
       "supportsTablet": true
     },
     "extra": {
-      "apiUrl": "http://72.62.75.203:4000"
+      "apiUrl": "https://exambook.frontwebtech.com"
     },
     "plugins": [
       "expo-asset",
